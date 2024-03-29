@@ -11,7 +11,7 @@ app = FastAPI()
 # ZeroMQ Publisher setup
 context = zmq.Context()
 publisher = context.socket(zmq.PUB)
-publisher.bind("tcp://192.168.0.10:5555")  # Adjust the address as needed
+publisher.bind("tcp://*:5555")  # Allow connections from any IP address
 
 async def send_message(message: Message):
     try:
