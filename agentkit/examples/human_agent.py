@@ -47,9 +47,6 @@ if __name__ == "__main__":
     parser.add_argument("--description", help="Description of the agent. Introduce yourself to the world. Default 'I am a human agent. Ask me anything!'", default="I am a human agent. Ask me anything!")
     parser.add_argument("--bus_ip", default="127.0.0.1", help="The IP Address of the bus to subscribe to. Default 127.0.0.1")
     args = parser.parse_args()
-
     asyncio.run(main(name=args.name, 
                      description=args.description, 
                      bus_ip=args.bus_ip))
-
-    asyncio.run(main())
