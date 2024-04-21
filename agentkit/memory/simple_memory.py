@@ -1,4 +1,4 @@
-from agentkit.messages import Message
+from agentkit.messages import Message, MessageType
 
 
 class SimpleMemory:
