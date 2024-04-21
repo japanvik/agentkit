@@ -1,3 +1,15 @@
+"""
+This module provides a data bus service for publishing messages using ZeroMQ and a FastAPI interface for receiving messages.
+
+The core functionality is provided by the `send_message` function, which sends a message object to a ZeroMQ publisher channel. It also offers a FastAPI endpoint (`/data`) to receive messages via an HTTP POST request.
+
+Additionally, this module includes a background task (`time_publisher_task`) that publishes system messages containing the current time every 5 minutes.
+
+**To run the databus:**
+
+1. (Optional) Activate your virtual environment (if applicable).
+2. Execute the script from the console: `python -m "agentkit.databus"`
+"""
 import asyncio
 import datetime
 
