@@ -3,7 +3,6 @@ import asyncio
 import logging
 
 from agentkit.agents.simple_agent import SimpleAgent
-from agentkit.memory.simple_memory import SimpleMemory
 from agentkit.messages import MessageType
 from agentkit.network import HTTPMessageSender, ZMQMessageReceiver
 from agentkit.io import console
