@@ -18,23 +18,21 @@ class SimpleAgent:
     The agent can register message handlers for specific message types to handle incoming messages appropriately.
     """
 
-    def __init__(self, config: dict, message_sender: MessageSender, name: str = "", description: str = ""):
+    def __init__(self, name:str, description:str, message_sender: MessageSender):
         """
         Constructor for the SimpleAgent class.
 
         Args:
-            config (dict): Configuration dictionary containing agent-specific settings.
-            message_sender (MessageSender): An instance of a message sender component for sending messages.
-            name (str, optional): The name of the agent. Defaults to "".
-            description (str, optional): A description of the agent. Defaults to "".
+            name (str): The name of the agent.
+            description (str): A description of the agent.
+            message_sender (MessageSender): An instance of a message sender component 
+              for sending messages.
         """
-
-        self.config: dict = config
-        self.message_sender: MessageSender = message_sender
-        # Get these from instatiation or config
-        self.name: str = self.get_config_value("name", name)
-        self.description: str = self.get_config_value("description", description)
-
+        
+        self.name = name
+        self.description = description
+        self.message_sender = message_sender
+        
         self.message_queue = asyncio.Queue()
         self.running = True
         self.tasks = {}
