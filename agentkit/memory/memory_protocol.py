@@ -1,5 +1,5 @@
 from typing import List, Protocol
-from agentkit.messages import Message
+from networkkit.messages import Message
 
 
 class Memory(Protocol):

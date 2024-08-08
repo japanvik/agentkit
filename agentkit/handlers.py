@@ -1,4 +1,4 @@
-from agentkit.messages import Message, MessageType
+from networkkit.messages import Message, MessageType
 
 
 async def default_handle_helo_message(agent, message: Message) -> None:

@@ -1,4 +1,4 @@
-from agentkit.messages import Message, MessageType
+from networkkit.messages import Message, MessageType
 
 
 class SimpleMemory:
@@ -49,7 +49,10 @@ class SimpleMemory:
 
         return self.history
 
-    def get_chat_context(self, target: str, prefix: str = "") -> str:
+    def get_chat_context(self, target: str, 
+                         prefix: str = "", 
+                         user_role_name:str="",
+                         assistant_role_name:str="") -> str:
         """
         Retrieve chat conversation history with a specific target (source or recipient) and format it with a prefix.
 
@@ -64,7 +67,29 @@ class SimpleMemory:
         Returns:
             str: A formatted string containing the chat context for the specified target, including prefixes.
         """
+        
+        chat_log = self.chat_log_for(target)
+        context = ""
+        for l in chat_log:
+            if l.source == target:
+                # Speaker selection - user
+                speaker = user_role_name if user_role_name else l.source
+            else:
+                # Speaker selection - assistant
+                speaker = assistant_role_name if assistant_role_name else l.source
 
-        chat_log = [x for x in self.get_history() if (target in [x.to, x.source]) and x.message_type == MessageType.CHAT]
-        context = "\n".join(f"{prefix}{x.source}: {x.content.strip()}" for x in chat_log)
+            context +=f"{prefix}{speaker}: {l.content.strip()}\n"
         return context
+
+
+    def chat_log_for(self, target) -> list[Message]:
+        """Retrieves the chat log for the specified target.
+
+        Args:
+            target (str): The target user or entity for which to retrieve the chat log.
+
+        Returns:
+            list: A list of `Message` objects representing the chat log for the specified target.
+        """
+        chat_log = [x for x in self.get_history() if (target in [x.to, x.source]) and x.message_type == MessageType.CHAT]
+        return chat_log

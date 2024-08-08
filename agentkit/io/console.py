@@ -1,5 +1,5 @@
 import aioconsole
-from agentkit.messages import Message, MessageType
+from networkkit.messages import Message, MessageType
 
 
 async def ainput(agent) -> None:

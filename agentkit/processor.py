@@ -15,7 +15,7 @@ async def llm_processor(llm_model: str,
                        system_prompt: str = "",
                        user_prompt: str = "",
                        api_base: str = "http://localhost:11434",
-                       stop: list[str] = ["\n"],
+                       stop: list[str] = [],
                        ) -> str:
     """
     Asynchronous function that utilizes a Large Language Model (LLM) to generate text in response to prompts.
@@ -49,8 +49,6 @@ async def llm_processor(llm_model: str,
         api_base=api_base,
         stop=stop
     )
-    acompletion()
-
     return response.choices[0].message.content.strip()
 
 

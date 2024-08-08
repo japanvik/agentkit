@@ -3,10 +3,10 @@ import asyncio
 import logging
 
 from agentkit.agents.simple_agent import SimpleAgent
-from agentkit.messages import MessageType
-from agentkit.network import HTTPMessageSender, ZMQMessageReceiver
 from agentkit.io import console
 from agentkit.handlers import print_chat_message
+from networkkit.messages import MessageType
+from networkkit.network import HTTPMessageSender, ZMQMessageReceiver
 
 # Task definitions
 async def user_input_task(agent):
@@ -15,8 +15,7 @@ async def user_input_task(agent):
         await asyncio.sleep(0.1)
 
 async def main(name:str, description:str, bus_ip:str="127.0.0.1"):
-    config = {"agent": {"name": name, "description":description, "model": "dummy/dummy"}}
-    agent = SimpleAgent(config=config, message_sender=HTTPMessageSender(publish_address=f"http://{bus_ip}:8000"))
+    agent = SimpleAgent(name=name, description=description, message_sender=HTTPMessageSender(publish_address=f"http://{bus_ip}:8000"))
     # Register the tasks to the agent
     agent.add_task("user_input", user_input_task(agent))
     agent.add_message_handler(MessageType.CHAT, print_chat_message)

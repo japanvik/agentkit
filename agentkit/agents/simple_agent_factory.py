@@ -1,8 +1,8 @@
 from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.memory.simple_memory import SimpleMemory
-from agentkit.messages import MessageType
-from agentkit.network import HTTPMessageSender
+from networkkit.messages import MessageType
+from networkkit.network import HTTPMessageSender
 
 def simple_agent_factory(
     name: str,
@@ -19,7 +19,6 @@ def simple_agent_factory(
     # Extract configuration values with overriden options from arguments (if provided)
     # Create the SimpleAgent instance
     agent = SimpleAgent(
-        config=config,
         name=name,
         description=description,
         message_sender=HTTPMessageSender(publish_address=f"http://{bus_ip}:8000"),

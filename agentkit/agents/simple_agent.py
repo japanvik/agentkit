@@ -2,9 +2,9 @@ import asyncio
 import logging
 import requests
 from typing import Any
-from agentkit.messages import Message, MessageType
-from agentkit.network import MessageSender
 from agentkit.handlers import default_handle_helo_message
+from networkkit.messages import Message, MessageType
+from networkkit.network import MessageSender
 
 
 class SimpleAgent:

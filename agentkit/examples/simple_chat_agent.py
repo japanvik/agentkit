@@ -6,9 +6,9 @@ import logging
 # Import modules from agentkit framework
 from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.brains.simple_brain import SimpleBrain
-from agentkit.messages import MessageType
-from agentkit.network import HTTPMessageSender, ZMQMessageReceiver
 from agentkit.memory.simple_memory import SimpleMemory
+from networkkit.messages import MessageType
+from networkkit.network import HTTPMessageSender, ZMQMessageReceiver
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO)
