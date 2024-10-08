@@ -36,6 +36,6 @@ async def ainput(agent) -> None:
             content = message.replace(first_part, "").strip()[1:]
             destination = first_part.replace("TO:", "").strip()
         msg = Message(source=agent.name, to=destination, content=content, message_type=MessageType.CHAT)
-        agent.message_sender.send_message(msg)
+        await agent.message_sender.send_message(msg)
     else:
         raise ValueError("Exit was called")
