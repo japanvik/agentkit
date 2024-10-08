@@ -1,5 +1,6 @@
 import json
 import re
+from typing import Dict, List
 
 from litellm import acompletion
 
@@ -35,8 +36,6 @@ async def llm_processor(llm_model: str,
         str: The generated text response from the LLM.
     """
 
-    #set_verbose(True)
-
     # Create message list with system and user prompts (if provided)
     messages = [{"content": system_prompt, "role": "system"}]
     if user_prompt:
@@ -49,6 +48,27 @@ async def llm_processor(llm_model: str,
         api_base=api_base,
         stop=stop
     )
+    return response.choices[0].message.content.strip()
+
+async def llm_chat_processor(llm_model: str, prompt: List[Dict], api_base: str = "http://localhost:11434") -> str:
+    """
+    Asynchronous function that utilizes a Large Language Model (LLM) to generate text in response to prompts.
+    This is the 'chat' variant of the prompt handling.
+
+    Args:
+        llm_model (str): The name of the LLM model to be used.
+        prompt: (List[Dict]) : The system prompt to provide context to the LLM.
+        api_base (str, optional): The base URL of the LLM API endpoint. Defaults to "http://localhost:11434".
+
+    Returns:
+        str: The generated text response from the LLM.
+    """
+
+    #set_verbose(True)
+
+    # Generate response using LLM
+    response = await acompletion(model=llm_model, prompt=prompt, api_base=api_base)
+    print(f"response: {response}")
     return response.choices[0].message.content.strip()
 
 

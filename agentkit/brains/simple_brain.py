@@ -14,7 +14,7 @@ class SimpleBrain:
     description, context, and target recipient. These prompts are used to guide the LLM in response generation.
     """
 
-    def __init__(self, name: str, description: str, model: str, memory_manger: Memory, system_prompt: str = "", user_prompt: str = "") -> None:
+    def __init__(self, name: str, description: str, model: str, memory_manager: Memory, system_prompt: str = "", user_prompt: str = "") -> None:
         """
         Constructor for the SimpleBrain class.
 
@@ -22,7 +22,7 @@ class SimpleBrain:
             name (str): The name of the agent.
             description (str): A description of the agent.
             model (str): The name of the LLM model to be used for response generation.
-            memory_manger (Memory): An instance of a memory component implementing the `Memory` protocol for conversation history storage.
+            memory_manager (Memory): An instance of a memory component implementing the `Memory` protocol for conversation history storage.
             system_prompt (str, optional): The system prompt template for the LLM, formatted with placeholders. Defaults to "".
             user_prompt (str, optional): The user prompt template for the LLM, formatted with placeholders. Defaults to "".
         """
@@ -30,7 +30,7 @@ class SimpleBrain:
         self.name = name
         self.description = description
         self.model = model
-        self.memory_manager = memory_manger
+        self.memory_manager = memory_manager
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
 
@@ -91,7 +91,7 @@ class SimpleBrain:
         return msg
 
 
-    def create_chat_messages_prompt(self, system_prompt:str, user_prompt:str,agent) -> list:
+    def create_chat_messages_prompt(self, system_prompt:str, agent:str) -> list:
         """
         Generate a chat message response using the LLM based on the current context and prompts.
 

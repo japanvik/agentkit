@@ -6,6 +6,7 @@ import logging
 # Import modules from agentkit framework
 from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.brains.simple_brain import SimpleBrain
+from agentkit.brains.simple_brain_instruct import SimpleBrainInstruct
 from agentkit.memory.simple_memory import SimpleMemory
 from networkkit.messages import MessageType
 from networkkit.network import HTTPMessageSender, ZMQMessageReceiver
@@ -104,8 +105,8 @@ async def main(name: str, description: str, config_file: str, model: str, bus_ip
       message_sender=HTTPMessageSender(publish_address=f"http://{bus_ip}:8000"),
   )
 
-  # Create the SimpleBrain instance
-  brain = SimpleBrain(
+  # Create the SimpleBrain Implementation instance
+  brain = SimpleBrainInstruct(
       name=name,
       description=description,
       model=model,
