@@ -18,7 +18,7 @@ async def main(name:str, description:str, bus_ip:str="127.0.0.1"):
     agent = SimpleAgent(name=name, description=description, message_sender=HTTPMessageSender(publish_address=f"http://{bus_ip}:8000"))
     # Register the tasks to the agent
     agent.add_task("user_input", user_input_task(agent))
-    agent.add_message_handler(MessageType.CHAT, print_chat_message)
+    agent.register_message_handler(MessageType.CHAT, print_chat_message)
    
     # Initialize the Message Reciever 
     message_receiver = ZMQMessageReceiver(subscribe_address=f"tcp://{bus_ip}:5555")
