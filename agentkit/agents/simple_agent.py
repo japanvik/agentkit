@@ -7,40 +7,64 @@ from typing import Any, Callable, Dict
 from networkkit.network import MessageSender
 from networkkit.messages import Message, MessageType
 from agentkit.agents.base_agent import BaseAgent
-from agentkit.handlers import default_handle_helo_message
-
 
 class SimpleAgent(BaseAgent):
     """
     Core agent class implementing message handling, dispatching, and interaction logic.
+    Inherits from BaseAgent to utilize centralized HELO/ACK functionalities.
     """
 
-    def __init__(self, name: str, description: str, message_sender: MessageSender):
+    def __init__(
+        self, 
+        name: str, 
+        description: str, 
+        message_sender: MessageSender,
+        bus_ip: str = "127.0.0.1",
+        ttl_minutes: int = 5,
+        helo_interval: int = 60,
+        cleanup_interval: int = 60,
+        system_prompt: str = "",
+        user_prompt: str = "",
+        model: str = ""
+    ):
         """
         Constructor for the SimpleAgent class.
 
         Args:
             name (str): The name of the agent.
             description (str): A description of the agent.
-            message_sender (MessageSender): An instance of a message sender component 
-              for sending messages.
+            message_sender (MessageSender): An instance of a message sender component for sending messages.
+            bus_ip (str): The IP address of the bus to subscribe to.
+            ttl_minutes (int): Time-to-live for agent availability.
+            helo_interval (int): Interval in seconds to send HELO messages.
+            cleanup_interval (int): Interval in seconds to clean up expired agents.
+            system_prompt (str): System prompt for the agent's brain.
+            user_prompt (str): User prompt for the agent's brain.
+            model (str): Model identifier for the agent's brain.
         """
-        super().__init__(name=name, description=description, system_prompt="", user_prompt="", model="")  # Initialize BaseAgent
-        self.message_sender = message_sender
+        super().__init__(
+            name=name,
+            description=description,
+            message_sender=message_sender,
+            bus_ip=bus_ip,
+            ttl_minutes=ttl_minutes,
+            helo_interval=helo_interval,
+            cleanup_interval=cleanup_interval
+        )
+        
+        # Additional attributes specific to SimpleAgent
+        self.system_prompt = system_prompt
+        self.user_prompt = user_prompt
+        self.model = model
 
+        # Initialize message queue
         self.message_queue = asyncio.Queue()
-        self.running = True
-        self.tasks: Dict[str, asyncio.Task] = {}
-        self.message_handlers: Dict[MessageType, Callable[[Message], Any]] = {
-            MessageType.HELO: default_handle_helo_message
-        }
-        self.attention: str = "ALL"
 
-        # Add default tasks
+        # Register additional message handlers if necessary
+        # Example: self.register_message_handler(MessageType.INFO, self.handle_info_message)
+
+        # Add the message_dispatcher task
         self.add_task("message_dispatcher", self.message_dispatcher())
-
-        # Send HELO message upon startup
-        self.send_helo()
 
     def add_task(self, task_name: str, coro):
         """
@@ -51,7 +75,7 @@ class SimpleAgent(BaseAgent):
             coro: The coroutine (asynchronous function) to be executed as a task.
         """
         if task_name in self.tasks:
-            self.remove_task(task_name)  # Cancel and remove existing task with the same name
+            asyncio.create_task(self.remove_task(task_name))  # Schedule task removal
         task = asyncio.create_task(coro, name=task_name)
         logging.info(f"Starting task: {task_name}")
         self.tasks[task_name] = task
@@ -71,32 +95,6 @@ class SimpleAgent(BaseAgent):
             except asyncio.CancelledError:
                 logging.info(f"Task '{task_name}' cancelled successfully.")
 
-    def add_message_handler(self, message_type: MessageType, handler: Callable[[Message], Any]) -> None:
-        """
-        Register a message handler function for a specific message type.
-
-        Args:
-            message_type (MessageType): The message type for which to register the handler.
-            handler (Callable[[Message], Any]): The handler function.
-        """
-        self.message_handlers[message_type] = handler
-        logging.info(f"Added handler for message type: {message_type.name}")
-        return handler
-
-    async def stop_all_tasks(self):
-        """
-        Stop all currently running tasks associated with the agent.
-        """
-        for task_name in list(self.tasks.keys()):
-            await self.remove_task(task_name)
-
-    async def handle_message(self, message: Message) -> Any:
-        """
-        Handle an incoming message received by the agent.
-        """
-        logging.info(f"Agent '{self.name}' received message: {message}")
-        await self.message_queue.put(message)
-
     async def message_dispatcher(self):
         """
         Continuously retrieve messages from the queue and dispatch them to the appropriate handlers.
@@ -106,7 +104,7 @@ class SimpleAgent(BaseAgent):
                 message = await self.message_queue.get()
                 handler = self.message_handlers.get(message.message_type)
                 if handler:
-                    await handler(self, message)  # Pass 'self' as the agent
+                    await handler(agent=self, message=message)
                 else:
                     logging.warning(f"Agent '{self.name}' received unhandled message type: {message.message_type}.")
                 await asyncio.sleep(0.1)  # Prevent tight loop
@@ -116,6 +114,19 @@ class SimpleAgent(BaseAgent):
                 break
             except Exception as e:
                 logging.error(f"Agent '{self.name}' encountered an error in message_dispatcher[{message}]: {e}")
+
+    async def send_message(self, message: Message) -> Any:
+        """
+        Send a message through the message sender component.
+
+        Args:
+            message (Message): The message to send.
+        """
+        try:
+            await self.message_sender.send_message(message)
+            logging.info(f"Sent {message.message_type} message to {message.to}.")
+        except Exception as e:
+            logging.error(f"Error sending message to {message.to}: {e}")
 
     def is_intended_for_me(self, message: Message) -> bool:
         """
@@ -132,32 +143,16 @@ class SimpleAgent(BaseAgent):
         not_my_helo = message.source != self.name and message.message_type == MessageType.HELO
         return for_me or not_my_helo or chat_by_me
 
-    def send_helo(self) -> Any:
-        """
-        Send a HELO message upon agent startup.
-        """
-        msg = Message(source=self.name, to="ALL", content=self.description, message_type=MessageType.HELO)
-        return self.send_message(msg)
-
-    def send_message(self, message: Message) -> Any:
-        """
-        Send a message through the message sender component.
-        """
-        return self.message_sender.send_message(message)
-
     async def start(self):
         """
         Start the agent by running its tasks.
         """
         logging.info(f"Agent '{self.name}' started.")
-        while self.running:
-            await asyncio.sleep(1)
+        await super().start()
 
     async def stop(self):
         """
         Stop the agent by stopping its tasks and setting the running flag to False.
         """
         logging.info(f"Agent '{self.name}' stopping...")
-        self.running = False
-        await self.stop_all_tasks()
-        logging.info(f"Agent '{self.name}' stopped.")
+        await super().stop()

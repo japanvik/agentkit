@@ -1,3 +1,4 @@
+from agentkit.agents.base_agent import BaseAgent
 from agentkit.memory.memory_protocol import Memory
 from agentkit.processor import llm_processor, remove_emojis
 from networkkit.messages import Message, MessageType
@@ -34,7 +35,7 @@ class SimpleBrain:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
 
-    async def handle_chat_message(self, agent, message: Message):
+    async def handle_chat_message(self, agent:BaseAgent, message: Message):
         """
         Handle incoming chat messages directed to the agent.
 
@@ -53,11 +54,11 @@ class SimpleBrain:
         """
 
         self.memory_manager.remember(message)
-        if message.source != agent.name:
+        if message.source != self.name:
             # Reply to a chat message from someone
             agent.attention = message.source
             response = await self.create_completion_message(agent)
-            agent.send_message(response)
+            await agent.send_message(response)
 
     async def create_completion_message(self, agent) -> Message:
         """
@@ -91,7 +92,7 @@ class SimpleBrain:
         return msg
 
 
-    def create_chat_messages_prompt(self, system_prompt:str, agent:str) -> list:
+    def create_chat_messages_prompt(self, agent, system_prompt:str) -> list:
         """
         Generate a chat message response using the LLM based on the current context and prompts.
 
@@ -133,9 +134,6 @@ class SimpleBrain:
         This method first removes the prefix that includes the name of this object and the agent's attention marker from the reply. 
         It also strips any emojis to ensure the message is plain text. Finally, it creates a new Message object with the specified attributes.
         """
-        #reply = reply.replace(f"{self.name}:", "").strip()
-        #reply = reply.replace(f"{agent.attention}:", "").strip()
-        #reply = remove_emojis(reply)
         msg = Message(source=self.name, to=agent.attention, content=reply, message_type=MessageType.CHAT)
         return msg
 
