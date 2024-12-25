@@ -1,6 +1,17 @@
+import asyncio
 import aioconsole
 from networkkit.messages import Message, MessageType
+from rich.console import Console
+from rich.prompt import Prompt
 
+console = Console()
+
+async def async_input(prompt: str = "") -> str:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: Prompt.ask(prompt, console=console))
+
+async def async_print(text, **kwargs):
+    console.print(text, **kwargs)
 
 async def ainput(agent) -> None:
     """
@@ -25,8 +36,8 @@ async def ainput(agent) -> None:
         ValueError: If the user enters "exit".
     """
 
-    prompt = f"##{agent.name} ({agent.attention}):"
-    message = await aioconsole.ainput(prompt)
+    prompt = f"[bold blue]{agent.name}[/bold blue]:"
+    message = await async_input(prompt)
     if message != "exit":
         if not message.startswith("TO:"):
             destination = agent.attention
