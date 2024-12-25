@@ -31,7 +31,7 @@ class SimpleBrainInstruct(SimpleBrain):
         """
         context=""
         system_prompt = self.system_prompt.format(name=self.name, description=self.description, context=context, target=agent.attention)
-        prompt = self.create_chat_messages_prompt(system_prompt, agent)
+        prompt = self.create_chat_messages_prompt(agent, system_prompt)
         #print(f"prompt: {prompt}")
         model = self.model.split('/')[-1]
         response = ollama.chat(model=model, messages=prompt)
