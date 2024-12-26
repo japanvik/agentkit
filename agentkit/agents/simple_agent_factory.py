@@ -6,6 +6,10 @@ from agentkit.brains.human_brain import HumanBrain
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.brains.simple_brain_instruct import SimpleBrainInstruct
 from agentkit.memory.simple_memory import SimpleMemory
+
+MEMORIES = {
+    "SimpleMemory": SimpleMemory
+}
 from networkkit.messages import MessageType
 from networkkit.network import HTTPMessageSender
 import logging
@@ -29,6 +33,7 @@ def simple_agent_factory(
     user_prompt: str,
     agent_type: str,
     brain_type: str,
+    memory_type: str = "SimpleMemory",
     bus_ip: str = "127.0.0.1",
     ttl_minutes: int = 5,
     helo_interval: int = 300,
@@ -54,11 +59,15 @@ def simple_agent_factory(
 
     # Create the SimpleBrainInstruct instance and link it to the agent
     brain_class = BRAINS.get(brain_type, SimpleBrainInstruct)
+    # Create memory manager instance
+    memory_class = MEMORIES.get(memory_type, SimpleMemory)
+    memory_manager = memory_class(max_history_length=6)
+
     brain = brain_class(
         name=name,
         description=description,
         model=model,
-        memory_manager=SimpleMemory(max_history_length=6),
+        memory_manager=memory_manager,
         system_prompt=system_prompt,
         user_prompt=user_prompt
     )

@@ -1,9 +1,11 @@
 # agent_manager.py
 
 import asyncio
+import json
 import logging
 import signal
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from networkkit.network import ZMQMessageReceiver
 from agentkit.agents.simple_agent_factory import simple_agent_factory
@@ -13,6 +15,33 @@ class AgentManager:
     """
     Manages multiple agents and coordinates their lifecycle.
     """
+
+    @staticmethod
+    def load_config(config_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Loads configuration from a JSON file.
+
+        Args:
+            config_path (str): Path to the JSON configuration file.
+
+        Returns:
+            Optional[Dict[str, Any]]: The loaded configuration dictionary, or None if loading fails.
+        """
+        config_file = Path(config_path)
+        if not config_file.is_file():
+            logging.error(f"Configuration file '{config_path}' does not exist.")
+            return None
+
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            return config
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing configuration file: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Error loading configuration file: {e}")
+            return None
 
     def __init__(self, config: Dict[str, Any]):
         """
@@ -46,6 +75,8 @@ class AgentManager:
                     model=agent_conf["model"],
                     system_prompt=agent_conf.get("system_prompt", ""),
                     user_prompt=agent_conf.get("user_prompt", ""),
+                    agent_type=agent_conf.get("agent_type", "SimpleAgent"),
+                    brain_type=agent_conf.get("brain_type", "SimpleBrain"),
                     bus_ip=bus_ip
                 )
                 self.agents.append(agent)
