@@ -7,12 +7,13 @@ from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.brains.simple_brain_instruct import SimpleBrainInstruct
 from agentkit.memory.simple_memory import SimpleMemory
 
-MEMORIES = {
-    "SimpleMemory": SimpleMemory
-}
 from networkkit.messages import MessageType
 from networkkit.network import HTTPMessageSender
 import logging
+
+MEMORIES = {
+    "SimpleMemory": SimpleMemory
+}
 
 AGENTS = {
     "SimpleAgent": SimpleAgent,
