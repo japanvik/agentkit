@@ -1,7 +1,8 @@
 from networkkit.messages import Message, MessageType
+from agentkit.memory.base_memory import BaseMemory
 
 
-class SimpleMemory:
+class SimpleMemory(BaseMemory):
     """
     Simple in-memory implementation of the Memory protocol for agent conversation history.
 
@@ -17,8 +18,8 @@ class SimpleMemory:
             max_history_length (int, optional): The maximum number of messages to store in the history. Defaults to 10.
         """
 
+        super().__init__(max_history_length)
         self.history = []
-        self.max_history_length = max_history_length
 
     def remember(self, message: Message) -> None:
         """
