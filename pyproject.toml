@@ -1,25 +1,24 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
+[tool.poetry]
 name = "agentkit"
 version = "0.0.2"
-dependencies = [
-  "networkkit",
-  "litellm"
-]
-requires-python = ">=3.8"
-authors = [
-  {name = "Vikram Kumar", email = "vik@japanvik.net"},
-]
 description = "A simple framework for creating distributed llm agent swarms"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "Apache-2.0"
+authors = ["Vikram Kumar <vik@japanvik.net>"]
 keywords = ["artificial intelligencs", "pubsub", "llm"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python"
 ]
-[project.urls]
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+networkkit = "*"
+litellm = "*"
+
+[tool.poetry.urls]
 Repository = "https://github.com/japanvik/agentkit"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
