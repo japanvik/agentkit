@@ -11,7 +11,6 @@ from agentkit.agents.human_agent import HumanAgent
 from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.brains.human_brain import HumanBrain
 from agentkit.brains.simple_brain import SimpleBrain
-from agentkit.brains.simple_brain_instruct import SimpleBrainInstruct
 from agentkit.memory.simple_memory import SimpleMemory
 
 # Built-in implementations
@@ -22,7 +21,6 @@ BUILTIN_AGENTS = {
 
 BUILTIN_BRAINS = {
     "SimpleBrain": SimpleBrain,
-    "SimpleBrainInstruct": SimpleBrainInstruct,
     "HumanBrain": HumanBrain
 }
 

@@ -76,10 +76,7 @@ class SimpleBrain:
             Message: The generated message object (type: agentkit.messages.Message) containing the response content.
         """
         prefix = "##"
-        if self.model == "ollama/youri-7b-chat":
-            context = self.memory_manager.get_chat_context(target=agent.attention, user_role_name="ユーザー", assistant_role_name="システム")
-        else:
-            context = self.memory_manager.get_chat_context(prefix=prefix, target=agent.attention)
+        context = self.memory_manager.get_chat_context(prefix=prefix, target=agent.attention)
         print(f"context: {context}")
         system_prompt = self.system_prompt.format(name=self.name, description=self.description, context=context, target=agent.attention)
         user_prompt = self.user_prompt.format(name=self.name, description=self.description, context=context, target=agent.attention)
