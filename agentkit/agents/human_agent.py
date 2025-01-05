@@ -177,8 +177,11 @@ class HumanAgent(BaseAgent):
         return for_me or not_my_helo or chat_by_me
 
     async def run(self):
-        while self.running:
-            await asyncio.sleep(1)
+        try:
+            while self.running:
+                await asyncio.sleep(0.1)  # Reduced sleep time for faster response
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            self.running = False
         
     async def stop(self):
         """

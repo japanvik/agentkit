@@ -105,10 +105,22 @@ class SimpleAgent(BaseAgent):
     async def stop(self):
         """
         Stop the agent by stopping its tasks and setting the running flag to False.
-        Again, BaseAgent implements the underlying logic.
+        Ensures proper cleanup of resources including aiohttp sessions.
         """
         logging.info(f"Agent '{self.name}' stopping (SimpleAgent).")
-        await super().stop()
+        try:
+            # Close any aiohttp sessions if they exist
+            if hasattr(self, 'message_sender') and hasattr(self.message_sender, 'session'):
+                if not self.message_sender.session.closed:
+                    await self.message_sender.session.close()
+            
+            # Call parent class stop method
+            await super().stop()
+            
+            # Allow a moment for cleanup
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logging.error(f"Error during stop: {e}")
 
     async def run(self):
         """
@@ -116,5 +128,8 @@ class SimpleAgent(BaseAgent):
         Otherwise, BaseAgent's default run loop sleeps indefinitely 
         until stop() is called.
         """
-        while self.running:
-            await asyncio.sleep(1)
+        try:
+            while self.running:
+                await asyncio.sleep(0.1)  # Reduced sleep time for faster response
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            self.running = False
