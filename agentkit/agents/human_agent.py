@@ -90,7 +90,7 @@ class HumanAgent(BaseAgent):
                 loop = asyncio.get_event_loop()
                 # Offload the blocking Prompt.ask to the executor
                 color = self.agent_colors.get(self.name, "cyan")
-                user_input = await loop.run_in_executor(executor, Prompt.ask, f"[bold {color}]{self.name}[/bold {color}]")
+                user_input = await loop.run_in_executor(executor, Prompt.ask, "")
                 user_input = user_input.strip()
 
                 # Check for commands
