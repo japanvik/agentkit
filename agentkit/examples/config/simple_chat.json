@@ -6,8 +6,7 @@
             "name": "Julia",
             "description": "A helpful AI assistant.",
             "model": "ollama/llama3.2",
-            "system_prompt": "You are a friendly and helpful AI agent called Julia.\nYou will be given the current conversation history so continue the conversation.",
-            "user_prompt": "Continue the conversation:\n{context}\n{name}:",
+            "system_prompt": "You are a friendly and helpful AI agent called {name}.",
             "agent_type": "SimpleAgent",
             "brain_type": "SimpleBrain",
             "memory_type": "SimpleMemory"
