@@ -32,36 +32,50 @@ class HumanAgent(BaseAgent):
         helo_interval: int = 300,  # seconds
         cleanup_interval: int = 300  # seconds
     ):
-
         super().__init__(
-            name=name, 
-            description=description, 
-            message_sender=message_sender, 
+            name=name,
+            description=description,
+            message_sender=message_sender,
             bus_ip=bus_ip,
             ttl_minutes=ttl_minutes,
             helo_interval=helo_interval,
             cleanup_interval=cleanup_interval
         )
+        # We no longer need a local message_queue because BaseAgent manages it.
 
-        # Initialize message queue (if not handled by BaseAgent)
-        self.message_queue = asyncio.Queue()
-
-        # Initialize additional tasks
+        # Launch an additional task to handle user input in a loop
         self.add_task("user_input", self.handle_user_input())
 
-    async def handle_chat_message(self, message: Message):
+        # Register a custom chat handler for human agents
+        # Notice we are registering a *static method* below.
+        self.register_message_handler(MessageType.CHAT, self.handle_chat_message)
+
+    @staticmethod
+    async def handle_chat_message(agent: "HumanAgent", message: Message):
         """
-        Handles incoming CHAT messages by printing them with color coding.
+        Handle incoming CHAT messages by printing them with color coding.
+
+        Args:
+            agent (HumanAgent): The current agent instance (passed from BaseAgent).
+            message (Message): The incoming message object.
         """
-        logging.info(f"Agent '{self.name}' received CHAT message: {message.content}")
+        logging.info(f"Human Agent '{agent.name}' received CHAT message: {message.content}")
         try:
             sender = message.source
             content = message.content
-            color = self.agent_colors.get(sender, "white")
+            logging.debug("A. Attempting to get color")
+
+            color = agent.agent_colors.get(sender, "cyan")
+            logging.debug(f"B. got {color} as agent color")
+
             formatted_message = f"[bold {color}]{sender}[/bold {color}]: {content}"
+            logging.debug(f"C. message is {formatted_message}")
+
             loop = asyncio.get_event_loop()
             # Offload the blocking print to the executor
+            logging.debug("D. Attempting to print the formatted message to console...")
             await loop.run_in_executor(executor, rich_console.print, formatted_message)
+
         except Exception as e:
             logging.error(f"Error handling CHAT message from {sender}: {e}")
 
@@ -75,7 +89,8 @@ class HumanAgent(BaseAgent):
             try:
                 loop = asyncio.get_event_loop()
                 # Offload the blocking Prompt.ask to the executor
-                user_input = await loop.run_in_executor(executor, Prompt.ask, "[bold blue]You[/bold blue]")
+                color = self.agent_colors.get(self.name, "cyan")
+                user_input = await loop.run_in_executor(executor, Prompt.ask, f"[bold {color}]{self.name}[/bold {color}]")
                 user_input = user_input.strip()
 
                 # Check for commands
@@ -101,8 +116,11 @@ class HumanAgent(BaseAgent):
                         if target.upper() == "ALL" or target in self.available_agents:
                             valid_targets.append(target)
                         else:
-                            # Offload the blocking print to the executor
-                            await loop.run_in_executor(executor, rich_console.print, f"[bold red]Error: Unknown or unavailable agent '{target}'.[/bold red]")
+                            await loop.run_in_executor(
+                                executor, 
+                                rich_console.print, 
+                                f"[bold red]Error: Unknown or unavailable agent '{target}'.[/bold red]"
+                            )
                     if not valid_targets:
                         continue
                 else:
@@ -119,6 +137,7 @@ class HumanAgent(BaseAgent):
                         message_type=MessageType.CHAT
                     )
                     await self.send_message(message)
+
             except Exception as e:
                 logging.error(f"Error handling user input: {e}")
 
@@ -135,7 +154,11 @@ class HumanAgent(BaseAgent):
         for agent_name, info in self.available_agents.items():
             color = self.agent_colors.get(agent_name, "red")
             description = info["description"]
-            await loop.run_in_executor(executor, rich_console.print, f"[bold {color}]{agent_name}[/bold {color}]: {description}")
+            await loop.run_in_executor(
+                executor,
+                rich_console.print,
+                f"[bold {color}]{agent_name}[/bold {color}]: {description}"
+            )
 
     def is_intended_for_me(self, message: Message) -> bool:
         """
@@ -148,11 +171,15 @@ class HumanAgent(BaseAgent):
             bool: True if the message is intended for this agent, False otherwise.
         """
         logging.debug(f"Checking if message is intended for {self.name}: {message}")
-        for_me = message.to == self.name or message.to == "ALL"
-        chat_by_me = message.source == self.name and message.message_type == MessageType.CHAT  # for storing as history
-        not_my_helo = message.source != self.name and message.message_type == MessageType.HELO
+        for_me = (message.to == self.name or message.to == "ALL")
+        chat_by_me = (message.source == self.name and message.message_type == MessageType.CHAT)
+        not_my_helo = (message.source != self.name and message.message_type == MessageType.HELO)
         return for_me or not_my_helo or chat_by_me
 
+    async def run(self):
+        while self.running:
+            await asyncio.sleep(1)
+        
     async def stop(self):
         """
         Override the stop method to shut down the executor.
