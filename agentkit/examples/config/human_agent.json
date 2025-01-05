@@ -1,0 +1,15 @@
+{
+    "bus_ip": "127.0.0.1",
+    "agents": [
+        {
+            "name": "Human",
+            "description": "I am a human agent. Ask me anything!",
+            "model": "",
+            "system_prompt": "",
+            "user_prompt": "",
+            "agent_type": "HumanAgent",
+            "brain_type": "HumanBrain"
+
+        }
+    ]
+}

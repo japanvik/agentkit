@@ -1,9 +1,16 @@
 {
-    "agent": {
-        "name": "Julia",
-        "description": "A helpful AI assistant.",
-        "model": "ollama/dolphin-mistral",
-        "system_prompt": "You are an AI agent called {name} who excels at conversations. Your description is as follows: {description}\n You will be given the current history so continue the conversation and be engaged.\nMake your words short and specific.\n",
-        "user_prompt": "Continue the conversation:\n{context}\n{name}:"
-    }
+    "bus_ip": "127.0.0.1",
+    "plugins_dir": "plugins",
+    "agents": [
+        {
+            "name": "Julia",
+            "description": "A helpful AI assistant.",
+            "model": "ollama/llama3.2",
+            "system_prompt": "You are a friendly and helpful AI agent called Julia.\nYou will be given the current conversation history so continue the conversation.",
+            "user_prompt": "Continue the conversation:\n{context}\n{name}:",
+            "agent_type": "SimpleAgent",
+            "brain_type": "SimpleBrain",
+            "memory_type": "SimpleMemory"
+        }
+    ]
 }
