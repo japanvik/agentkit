@@ -16,20 +16,6 @@ Ensure you have Python 3.8 or higher installed to meet the compatibility require
 
 ## Features
 
-### Data Hub-Centric Communication
-
-- **Unified Messaging Endpoint**: The Data Hub, a robust message handling endpoint, listens to incoming messages from any agent over HTTP. This centralized approach captures and manages all messages efficiently before broadcasting, using a Pub-Sub network for agents to pick up and act upon.
-
-- **Pub-Sub Messaging Protocol**: Using ZeroMQ to create a publish-subscribe messaging system, the Data Hub not only receives messages but also broadcasts them across the network. This setup allows for decoupled, asynchronous, and scalable communication patterns, ideal for complex distributed systems.
-
-- **Dynamic Agent Interaction via ZMQ**:
-  - **ZMQMessageReceiver**: Agents subscribe to messages through the `ZMQMessageReceiver`, the subscriber endpoint within the pub-sub model. This component is crucial for agents that need to process broadcasted messages relevant to their roles.
-  - **Real-time Message Distribution**: The Data Hub, upon receiving a message, immediately publishes it to the subscribed agents, enabling real-time response and interaction among agents. This capability is particularly useful where timing and speed of information dissemination are critical.
-
-- **Scalable and Efficient**: ZeroMQ allows the system to handle high volumes of messages with minimal latency, enabling scalability to large networks of interacting agents.
-
-- **Flexible and Configurable**: Agents can dynamically register or deregister with the `ZMQMessageReceiver`, allowing for flexible network configurations and adaptation to changing system conditions.
-
 ### Simplified Agent Framework
 
 - **Easy to Create and Manage Agents**: The framework facilitates lightweight and straightforward implementation of agents, with a simple interface for sending and receiving messages. AgentKit is suitable for developers seeking to build systems with complex interactions but straightforward code.
@@ -68,29 +54,25 @@ Still in the works. Refer to the source docstrings for documentation for now.
 
 ### Quick Start Guide
 
-#### Running the Data Hub
+#### Running the Data Bus
 
-The Data Hub is central to the AgentKit framework, facilitating communication between different agents. To start the Data Hub, use the following command:
+The [Networkkit](https://github.com/japanvik/networkkit) project which spun off from this project has a Data bus implementation that handles the communication aspects of the agents. To start the Data Bus, use the following command:
 
 ```bash
-python -m agentkit.datahub
+python -m networkkit.databus
 ```
 
-This command initializes the Data Hub, which listens for incoming messages from agents and handles their distribution across the network using the Pub-Sub model. Ensure all required dependencies are installed and the Python environment is correctly set up to run this module.
+This command initializes the Data Hub, which listens for incoming messages from agents and handles their distribution across the network using the Pub-Sub model. Networkkit should be installed as part of a dependancy of Agentkit.
 
 #### Running the Example Chat Bot Agent
 
-To run a chat bot agent that utilizes the Data Hub for sending and receiving messages, follow these steps:
+To run a chat bot agent that utilizes the Data Bub for sending and receiving messages, follow these steps:
 
 1. **Download or Clone the Repository**:
    Ensure you have the latest version of the example files from the `examples` directory.
 
 2. **Configure the Agent**:
-   Examine and modify the configuration file (`simple_chat.json`) to fit your setup. By default, the agent is configured to interact with [Ollama](https://ollama.com/) running on localhost:
-
-   ```bash
-   python ./simple_chat_agent.py --config ./config/simple_chat.json
-   ```
+   Examine and modify the configuration file (`simple_chat.json`) to fit your setup. By default, the agent is configured to interact with [Ollama](https://ollama.com/) running on localhost.
 
    Update the configuration settings for the model and identity as necessary. For using other LLMs like OpenAI's models, refer to the [Litellm documentation](https://docs.litellm.ai/docs/) for details on specifying API keys and model settings.
 
@@ -98,23 +80,19 @@ To run a chat bot agent that utilizes the Data Hub for sending and receiving mes
    Execute the following command to start the chat bot:
 
    ```bash
-   python ./simple_chat_agent.py --config ./config/simple_chat.json
+   python ./config_agent.py --config ./config/simple_chat.json
    ```
 
    This script will initiate the chat bot that communicates through the Data Hub using the specified LLM settings.
 
 #### Running the Example Human Agent
 
-To interact with the LLM-powered chat bot, launch the human agent script:
-
-1. **Start the Human Agent**:
-   Run the following command, replacing `"Your Name"` with your desired agent name:
+To interact with the LLM-powered chat bot above, launch the agent with the human_agent.json as the configuration file so you can send it chat messages and interact with it:
 
    ```bash
-   python ./human_agent.py --name "Your Name"
+   python ./config_agent.py --config ./config/human_agent.json --loglevel WARN
    ```
 
-2. **Interact with the Chat Bot**:
    Once the command line prompt appears, begin typing your messages. The chat bot will respond according to the capabilities defined in its configuration.
 
 ## Further Assistance
