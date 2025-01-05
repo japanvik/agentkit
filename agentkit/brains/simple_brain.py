@@ -16,7 +16,16 @@ class SimpleBrain:
     description, context, and target recipient. These prompts are used to guide the LLM in response generation.
     """
 
-    def __init__(self, name: str, description: str, model: str, memory_manager: Memory, system_prompt: str = "", user_prompt: str = "") -> None:
+    def __init__(
+        self, 
+        name: str, 
+        description: str, 
+        model: str, 
+        memory_manager: Memory, 
+        system_prompt: str = "", 
+        user_prompt: str = "",
+        api_config: dict = None
+    ) -> None:
         """
         Constructor for the SimpleBrain class.
 
@@ -27,6 +36,11 @@ class SimpleBrain:
             memory_manager (Memory): An instance of a memory component implementing the `Memory` protocol for conversation history storage.
             system_prompt (str, optional): The system prompt template for the LLM, formatted with placeholders. Defaults to "".
             user_prompt (str, optional): The user prompt template for the LLM, formatted with placeholders. Defaults to "".
+            api_config (dict, optional): Configuration for the LLM API including base URL and API key. Defaults to None.
+                Can include:
+                - api_base: The base URL for the API
+                - api_key: The API key for authentication
+                - use_env: Whether to use environment variables for configuration
         """
 
         self.name = name
@@ -35,6 +49,7 @@ class SimpleBrain:
         self.memory_manager = memory_manager
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
+        self.api_config = api_config or {}
 
     async def handle_chat_message(self, agent:BaseAgent, message: Message):
         """
@@ -70,7 +85,16 @@ class SimpleBrain:
         system_prompt = self.system_prompt.format(name=self.name, description=self.description, context=context, target=agent.attention)
         
         messages = self.create_chat_messages_prompt(agent, system_prompt) # I don't like the wat this is implemented
-        reply = await llm_chat(llm_model=self.model, messages=messages)
+        # Extract API configuration
+        api_base = self.api_config.get('api_base')
+        api_key = self.api_config.get('api_key')
+        
+        reply = await llm_chat(
+            llm_model=self.model,
+            messages=messages,
+            api_base=api_base,
+            api_key=api_key
+        )
 
         msg = self.format_response(agent, reply)
         return msg
@@ -119,4 +143,3 @@ class SimpleBrain:
         """
         msg = Message(source=self.name, to=agent.attention, content=reply, message_type=MessageType.CHAT)
         return msg
-

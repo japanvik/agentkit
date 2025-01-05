@@ -1,0 +1,17 @@
+{
+    "bus_ip": "127.0.0.1",
+    "agents": [
+        {
+            "name": "Assistant",
+            "description": "A helpful AI assistant",
+            "system_prompt": "You are a helpful AI assistant that provides clear and concise responses.",
+            "model": "gpt-4",
+            "agent_type": "SimpleAgent",
+            "brain_type": "SimpleBrain",
+            "memory_type": "SimpleMemory",
+            "api_config": {
+                "use_env": true
+            }
+        }
+    ]
+}

@@ -29,7 +29,8 @@ class SimpleAgent(BaseAgent):
         cleanup_interval: int = 60,
         system_prompt: str = "",
         user_prompt: str = "",
-        model: str = ""
+        model: str = "",
+        api_config: dict = None
     ):
         """
         Constructor for the SimpleAgent class.
@@ -60,6 +61,7 @@ class SimpleAgent(BaseAgent):
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         self.model = model
+        self.api_config = api_config or {}
 
         # If needed, you could register more handlers here:
         # self.register_message_handler(MessageType.TYPE, self.my_custom_handler)

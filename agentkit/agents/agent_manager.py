@@ -57,7 +57,7 @@ class AgentManager:
         self.agent_tasks: List[asyncio.Task] = []
         self.shutdown_event = asyncio.Event()
 
-    def load_agents(self):
+    async def load_agents(self):
         """
         Initializes agents based on the configuration and registers them with the message receiver.
         """
@@ -77,7 +77,8 @@ class AgentManager:
                     user_prompt=agent_conf.get("user_prompt", ""),
                     agent_type=agent_conf.get("agent_type", "SimpleAgent"),
                     brain_type=agent_conf.get("brain_type", "SimpleBrain"),
-                    bus_ip=bus_ip
+                    bus_ip=bus_ip,
+                    api_config=agent_conf.get("api_config")
                 )
                 self.agents.append(agent)
                 logging.info(f"Loaded agent: {agent_conf['name']}")
@@ -85,6 +86,12 @@ class AgentManager:
                 logging.error(f"Missing required agent configuration parameter: {e}")
             except Exception as e:
                 logging.error(f"Error creating agent {agent_conf.get('name', 'Unknown')}: {e}")
+                # Clean up any resources that might have been created before the error
+                if 'agent' in locals():
+                    try:
+                        await agent.stop()
+                    except Exception as cleanup_error:
+                        logging.error(f"Error during cleanup after agent creation failure: {cleanup_error}")
 
     async def start(self):
         """
@@ -175,7 +182,7 @@ class AgentManager:
         Runs the AgentManager, handling initialization and shutdown.
         """
         self.register_signal_handlers()
-        self.load_agents()
+        await self.load_agents()
         await self.start()
 
         # Wait until a shutdown signal is received

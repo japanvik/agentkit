@@ -87,7 +87,8 @@ def simple_agent_factory(
     bus_ip: str = "127.0.0.1",
     ttl_minutes: int = 5,
     helo_interval: int = 300,
-    cleanup_interval: int = 300
+    cleanup_interval: int = 300,
+    api_config: dict = None
 ):
     """
     Factory function to create an agent with its corresponding Brain and Memory.
@@ -107,6 +108,11 @@ def simple_agent_factory(
         ttl_minutes: Time-to-live for agent availability
         helo_interval: HELO message interval
         cleanup_interval: Cleanup interval
+        api_config: Optional dictionary containing API configuration:
+            - api_base: Base URL for the API
+            - api_key: API key for authentication
+            - use_env: Whether to use environment variables
+            If not provided or None, defaults to environment variables or local settings
     """
     # Load custom plugins if directory exists
     custom_agents, custom_brains, custom_memories = load_custom_plugins(plugins_dir)
@@ -134,7 +140,8 @@ def simple_agent_factory(
         bus_ip=bus_ip,
         ttl_minutes=ttl_minutes,
         helo_interval=helo_interval,
-        cleanup_interval=cleanup_interval
+        cleanup_interval=cleanup_interval,
+        api_config=api_config
     )
 
     # Create memory manager instance
@@ -147,7 +154,8 @@ def simple_agent_factory(
         model=model,
         memory_manager=memory_manager,
         system_prompt=system_prompt,
-        user_prompt=user_prompt
+        user_prompt=user_prompt,
+        api_config=api_config
     )
 
     # Register message handlers

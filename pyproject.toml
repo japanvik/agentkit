@@ -5,7 +5,7 @@ description = "A simple framework for creating distributed llm agent swarms"
 readme = "README.md"
 license = "Apache-2.0"
 authors = ["Vikram Kumar <vik@japanvik.net>"]
-keywords = ["artificial intelligencs", "pubsub", "llm"]
+keywords = ["artificial intelligence", "agent frameworks", "llm"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python"
@@ -15,6 +15,7 @@ classifiers = [
 python = ">=3.8"
 networkkit = "*"
 litellm = "*"
+python-dotenv = "*"
 
 [tool.poetry.urls]
 Repository = "https://github.com/japanvik/agentkit"

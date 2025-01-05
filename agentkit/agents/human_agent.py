@@ -30,7 +30,11 @@ class HumanAgent(BaseAgent):
         bus_ip: str = "127.0.0.1",
         ttl_minutes: int = 5,
         helo_interval: int = 300,  # seconds
-        cleanup_interval: int = 300  # seconds
+        cleanup_interval: int = 300,  # seconds
+        api_config: dict = None,  # Not used by HumanAgent but included for interface consistency
+        system_prompt: str = "",   # Not used by HumanAgent but included for interface consistency
+        user_prompt: str = "",     # Not used by HumanAgent but included for interface consistency
+        model: str = ""           # Not used by HumanAgent but included for interface consistency
     ):
         super().__init__(
             name=name,

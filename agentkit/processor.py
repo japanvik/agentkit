@@ -1,8 +1,13 @@
 import json
+import os
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+from dotenv import load_dotenv
 from litellm import acompletion
+
+# Load environment variables from .env file
+load_dotenv()
 
 class JSONParseError(ValueError):
     """
@@ -11,17 +16,54 @@ class JSONParseError(ValueError):
 
     pass
 
-async def llm_chat(llm_model: str,
-                   messages:List[Dict],
-                   api_base: str = "http://localhost:11434"
-                   ) -> str:
+async def llm_chat(
+    llm_model: str,
+    messages: List[Dict],
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> str:
+    """
+    Generate a chat response using the specified LLM model.
+
+    Args:
+        llm_model (str): The name of the LLM model to use
+        messages (List[Dict]): List of message dictionaries in the format expected by the model
+        api_base (Optional[str]): Base URL for the API. If not provided, will use OPENAI_API_BASE 
+                                 from environment variables, or default to "http://localhost:11434"
+        api_key (Optional[str]): API key for authentication. If not provided, will use OPENAI_API_KEY
+                                from environment variables
+
+    Returns:
+        str: The generated response text
+
+    Note:
+        This function will attempt to load API configuration from environment variables if not provided:
+        - OPENAI_API_BASE: The base URL for the API
+        - OPENAI_API_KEY: The API key for authentication
+        
+        You can set these in a .env file in your project root:
+        OPENAI_API_BASE=your-api-base-url
+        OPENAI_API_KEY=your-api-key
+    """
+    # Get API base URL from parameter, environment, or default
+    final_api_base = api_base or os.getenv('OPENAI_API_BASE', "http://localhost:11434")
+    
+    # Get API key from parameter or environment
+    final_api_key = api_key or os.getenv('OPENAI_API_KEY')
+
+    # Prepare completion parameters
+    completion_params = {
+        "model": llm_model,
+        "messages": messages,
+        "api_base": final_api_base
+    }
+
+    # Add API key if available
+    if final_api_key:
+        completion_params["api_key"] = final_api_key
 
     # Generate response using LLM
-    response = await acompletion(
-        model=llm_model,
-        messages=messages,
-        api_base=api_base
-    )
+    response = await acompletion(**completion_params)
     return response.choices[0].message.content.strip()
 
 def extract_json(text: str) -> dict:
@@ -80,4 +122,4 @@ def remove_emojis(data):
             #u"\U000024C2-\U0001F251"
             "]+", flags=re.UNICODE)
 
-    return emoj.sub(r'', data) 
+    return emoj.sub(r'', data)
