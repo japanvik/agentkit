@@ -77,6 +77,8 @@ class AgentManager:
                     user_prompt=agent_conf.get("user_prompt", ""),
                     agent_type=agent_conf.get("agent_type", "SimpleAgent"),
                     brain_type=agent_conf.get("brain_type", "SimpleBrain"),
+                    memory_type=agent_conf.get("memory_type", "SimpleMemory"),
+                    plugins_dir=self.config.get("plugins_dir", "plugins"),
                     bus_ip=bus_ip,
                     api_config=agent_conf.get("api_config")
                 )
