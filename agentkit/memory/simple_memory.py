@@ -82,6 +82,10 @@ class SimpleMemory(BaseMemory):
             context +=f"{prefix}{speaker}: {l.content.strip()}\n"
         return context
 
+    def get_context(self) -> str:
+        """ This is a dumb implementation of the context
+        """
+        return ""
 
     def chat_log_for(self, target) -> list[Message]:
         """Retrieves the chat log for the specified target.

@@ -50,6 +50,7 @@ class SimpleBrain:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         self.api_config = api_config or {}
+        logging.info(f"Initialized brain: {self} with memory {self.memory_manager}")
 
     async def handle_chat_message(self, agent:BaseAgent, message: Message):
         """
@@ -81,7 +82,7 @@ class SimpleBrain:
         Generate a chat response for the agent based on the received message.
         """
         # format the system prompt
-        context = "" # We don't need this as the context is the messages themselves
+        context = self.get_context()
         system_prompt = self.system_prompt.format(name=self.name, description=self.description, context=context, target=agent.attention)
         
         messages = self.create_chat_messages_prompt(agent, system_prompt) # I don't like the wat this is implemented
@@ -99,6 +100,11 @@ class SimpleBrain:
         msg = self.format_response(agent, reply)
         return msg
 
+    def get_context(self):
+        # Get the context from the memory system
+        context = self.memory_manager.get_context()
+        return context
+    
     def create_chat_messages_prompt(self, agent, system_prompt:str) -> list:
         """
         Generate a chat message response using the LLM based on the current context and prompts.
