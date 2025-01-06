@@ -69,21 +69,36 @@ class AgentManager:
 
         for agent_conf in agents_config:
             try:
+                # Extract required parameters
+                name = agent_conf["name"]
+                description = agent_conf["description"]
+                model = agent_conf["model"]
+                
+                # Extract optional parameters with defaults
+                agent_type = agent_conf.get("agent_type", "SimpleAgent")
+                brain_type = agent_conf.get("brain_type", "SimpleBrain")
+                memory_type = agent_conf.get("memory_type", "SimpleMemory")
+                system_prompt = agent_conf.get("system_prompt", "")
+                user_prompt = agent_conf.get("user_prompt", "")
+                api_config = agent_conf.get("api_config")
+                plugins_dir = self.config.get("plugins_dir", "plugins")
+                
+                # Create agent with extracted parameters
                 agent = simple_agent_factory(
-                    name=agent_conf["name"],
-                    description=agent_conf["description"],
-                    model=agent_conf["model"],
-                    system_prompt=agent_conf.get("system_prompt", ""),
-                    user_prompt=agent_conf.get("user_prompt", ""),
-                    agent_type=agent_conf.get("agent_type", "SimpleAgent"),
-                    brain_type=agent_conf.get("brain_type", "SimpleBrain"),
-                    memory_type=agent_conf.get("memory_type", "SimpleMemory"),
-                    plugins_dir=self.config.get("plugins_dir", "plugins"),
+                    name=name,
+                    description=description,
+                    model=model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    agent_type=agent_type,
+                    brain_type=brain_type,
+                    memory_type=memory_type,
+                    plugins_dir=plugins_dir,
                     bus_ip=bus_ip,
-                    api_config=agent_conf.get("api_config")
+                    api_config=api_config
                 )
                 self.agents.append(agent)
-                logging.info(f"Loaded agent: {agent_conf['name']}")
+                logging.info(f"Loaded agent: {name}")
             except KeyError as e:
                 logging.error(f"Missing required agent configuration parameter: {e}")
             except Exception as e:

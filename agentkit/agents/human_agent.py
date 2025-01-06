@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict, Any
 
 from agentkit.agents.base_agent import BaseAgent
 from networkkit.network import MessageSender
@@ -25,51 +26,64 @@ class HumanAgent(BaseAgent):
     def __init__(
         self,
         name: str,
-        description: str,
-        message_sender: MessageSender,
-        bus_ip: str = "127.0.0.1",
-        ttl_minutes: int = 5,
-        helo_interval: int = 300,  # seconds
-        cleanup_interval: int = 300,  # seconds
-        api_config: dict = None,  # Not used by HumanAgent but included for interface consistency
-        system_prompt: str = "",   # Not used by HumanAgent but included for interface consistency
-        user_prompt: str = "",     # Not used by HumanAgent but included for interface consistency
-        model: str = ""           # Not used by HumanAgent but included for interface consistency
+        config: Dict[str, Any],
+        brain: Optional['SimpleBrain'] = None,
+        memory: Optional['Memory'] = None,
+        message_sender: Optional[MessageSender] = None
     ):
+        """
+        Initialize the human agent.
+        
+        Args:
+            name: Agent's name
+            config: Configuration dictionary
+            brain: Optional brain component (not used by HumanAgent)
+            memory: Optional memory component (not used by HumanAgent)
+            message_sender: Optional message sender for delegating communication
+        """
+        # Initialize base agent
         super().__init__(
             name=name,
-            description=description,
-            message_sender=message_sender,
-            bus_ip=bus_ip,
-            ttl_minutes=ttl_minutes,
-            helo_interval=helo_interval,
-            cleanup_interval=cleanup_interval
+            config=config,
+            brain=brain,
+            memory=memory,
+            message_sender=message_sender
         )
-        # We no longer need a local message_queue because BaseAgent manages it.
-
-        # Launch an additional task to handle user input in a loop
-        self.add_task("user_input", self.handle_user_input())
 
         # Register a custom chat handler for human agents
-        # Notice we are registering a *static method* below.
         self.register_message_handler(MessageType.CHAT, self.handle_chat_message)
 
-    @staticmethod
-    async def handle_chat_message(agent: "HumanAgent", message: Message):
+    async def start(self) -> None:
+        """Start the agent's background tasks."""
+        await super().start()
+        
+        # Create and start user input task
+        self._tasks.append(asyncio.create_task(
+            self.handle_user_input(),
+            name=f"{self.name}-user-input"
+        ))
+        logging.info(f"Started user input task for {self.name}")
+
+    async def handle_chat_message(self, message: Message) -> None:
         """
         Handle incoming CHAT messages by printing them with color coding.
 
         Args:
-            agent (HumanAgent): The current agent instance (passed from BaseAgent).
             message (Message): The incoming message object.
         """
-        logging.info(f"Human Agent '{agent.name}' received CHAT message: {message.content}")
+        logging.info(f"Human Agent '{self.name}' received CHAT message: {message.content}")
         try:
             sender = message.source
             content = message.content
             logging.debug("A. Attempting to get color")
 
-            color = agent.agent_colors.get(sender, "cyan")
+            # Default color scheme
+            agent_colors = {
+                self.name: "cyan",
+                "System": "yellow",
+                "Error": "red"
+            }
+            color = agent_colors.get(sender, "cyan")
             logging.debug(f"B. got {color} as agent color")
 
             formatted_message = f"[bold {color}]{sender}[/bold {color}]: {content}"
@@ -89,13 +103,17 @@ class HumanAgent(BaseAgent):
         Supports @ALL for broadcasting and comma-separated @Agent1,@Agent2 for multiple targets.
         Also supports commands like /ls.
         """
-        while self.running:
+        logging.info(f"User input handler started for {self.name}")
+        while self._running:
             try:
                 loop = asyncio.get_event_loop()
                 # Offload the blocking Prompt.ask to the executor
-                color = self.agent_colors.get(self.name, "cyan")
-                user_input = await loop.run_in_executor(executor, Prompt.ask, "")
+                prompt = f"[bold cyan]{self.name}[/bold cyan]> "
+                user_input = await loop.run_in_executor(executor, Prompt.ask, prompt)
                 user_input = user_input.strip()
+
+                if not user_input:
+                    continue
 
                 # Check for commands
                 if user_input.startswith("/"):
@@ -114,55 +132,40 @@ class HumanAgent(BaseAgent):
                     content = match.group(2)
                     # Split targets by comma if multiple
                     targets = [t.strip() for t in target_str.split(',')]
-                    # Validate targets
-                    valid_targets = []
+                    # Send to each target
                     for target in targets:
-                        if target.upper() == "ALL" or target in self.available_agents:
-                            valid_targets.append(target)
-                        else:
-                            await loop.run_in_executor(
-                                executor, 
-                                rich_console.print, 
-                                f"[bold red]Error: Unknown or unavailable agent '{target}'.[/bold red]"
-                            )
-                    if not valid_targets:
-                        continue
+                        message = Message(
+                            source=self.name,
+                            to=target.upper() if target.upper() == "ALL" else target,
+                            content=content,
+                            message_type=MessageType.CHAT
+                        )
+                        await self.send_message(message)
                 else:
-                    # Default target if none specified
-                    targets = ["ALL"]
-                    content = user_input
-
-                # Create and send messages
-                for target in targets:
+                    # Default to broadcast if no target specified
                     message = Message(
                         source=self.name,
-                        to=target,
-                        content=content,
+                        to="ALL",
+                        content=user_input,
                         message_type=MessageType.CHAT
                     )
                     await self.send_message(message)
 
             except Exception as e:
                 logging.error(f"Error handling user input: {e}")
+                await asyncio.sleep(1)  # Prevent tight loop on error
 
     async def list_available_agents(self):
         """
-        Displays the list of currently available agents with their descriptions.
+        Displays the list of currently available agents.
         """
         loop = asyncio.get_event_loop()
-        if not self.available_agents:
-            await loop.run_in_executor(executor, rich_console.print, "[bold yellow]No agents are currently available.[/bold yellow]")
-            return
-
         await loop.run_in_executor(executor, rich_console.print, "\n[bold underline]Available Agents:[/bold underline]")
-        for agent_name, info in self.available_agents.items():
-            color = self.agent_colors.get(agent_name, "red")
-            description = info["description"]
-            await loop.run_in_executor(
-                executor,
-                rich_console.print,
-                f"[bold {color}]{agent_name}[/bold {color}]: {description}"
-            )
+        await loop.run_in_executor(
+            executor,
+            rich_console.print,
+            f"[bold cyan]{self.name}[/bold cyan]: Human Agent"
+        )
 
     def is_intended_for_me(self, message: Message) -> bool:
         """
@@ -180,16 +183,7 @@ class HumanAgent(BaseAgent):
         not_my_helo = (message.source != self.name and message.message_type == MessageType.HELO)
         return for_me or not_my_helo or chat_by_me
 
-    async def run(self):
-        try:
-            while self.running:
-                await asyncio.sleep(0.1)  # Reduced sleep time for faster response
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            self.running = False
-        
-    async def stop(self):
-        """
-        Override the stop method to shut down the executor.
-        """
+    async def stop(self) -> None:
+        """Stop the agent and cleanup resources."""
         await super().stop()
         executor.shutdown(wait=True)

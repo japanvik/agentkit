@@ -1,137 +1,94 @@
-# agentkit/agents/simple_agent.py
-
-import asyncio
-import logging
-from typing import Any
-
-from networkkit.network import MessageSender
-from networkkit.messages import Message, MessageType
+"""Simple agent implementation."""
+from typing import Optional, Dict, Any
 from agentkit.agents.base_agent import BaseAgent
+from agentkit.brains.simple_brain import SimpleBrain
+from agentkit.memory.simple_memory import SimpleMemory
+from networkkit.messages import Message, MessageType
 
+# Built-in implementations
+BUILTIN_BRAINS = {
+    "SimpleBrain": SimpleBrain,
+    "HumanBrain": None  # Imported on demand to avoid circular imports
+}
+
+BUILTIN_MEMORIES = {
+    "SimpleMemory": SimpleMemory,
+    "AdvancedMemory": None  # Imported on demand to avoid circular imports
+}
 
 class SimpleAgent(BaseAgent):
     """
-    A straightforward agent that inherits from BaseAgent.
-    BaseAgent handles:
-      - The message queue
-      - The dispatcher (message_dispatcher)
-      - HELO/ACK registration
+    Simple agent implementation that uses configurable brain and memory components.
+    
+    This agent supports both built-in and custom plugin implementations for its
+    brain and memory components.
     """
-
+    
     def __init__(
         self,
         name: str,
-        description: str,
-        message_sender: MessageSender,
-        bus_ip: str = "127.0.0.1",
-        ttl_minutes: int = 5,
-        helo_interval: int = 60,
-        cleanup_interval: int = 60,
-        system_prompt: str = "",
-        user_prompt: str = "",
-        model: str = "",
-        api_config: dict = None
-    ):
+        config: Dict[str, Any],
+        brain: Optional[SimpleBrain] = None,
+        memory: Optional[SimpleMemory] = None,
+        message_sender: Optional['MessageSender'] = None
+    ) -> None:
         """
-        Constructor for the SimpleAgent class.
-
+        Initialize the simple agent.
+        
         Args:
-            name (str): The name of the agent.
-            description (str): A description of the agent.
-            message_sender (MessageSender): Used to send messages to the message bus.
-            bus_ip (str): The IP address of the bus. Defaults to "127.0.0.1".
-            ttl_minutes (int): Time-to-live for agent availability in minutes.
-            helo_interval (int): Interval in seconds between sending HELO messages.
-            cleanup_interval (int): Interval in seconds for cleaning up expired agents.
-            system_prompt (str): Optional system prompt for agent logic.
-            user_prompt (str): Optional user prompt for agent logic.
-            model (str): Optional model identifier for the agent's logic.
+            name: Agent's name
+            config: Configuration dictionary
+            brain: Optional brain component (will create based on config if None)
+            memory: Optional memory component (will create based on config if None)
+            message_sender: Optional message sender for delegating communication
         """
+        # Create memory component if not provided
+        if memory is None:
+            memory_type = config.get('memory_type', 'SimpleMemory')
+            
+            # Import custom memory type if specified
+            if memory_type not in BUILTIN_MEMORIES or BUILTIN_MEMORIES[memory_type] is None:
+                try:
+                    # Try to import from plugins
+                    from plugins.memory.advanced_memory import AdvancedMemory
+                    BUILTIN_MEMORIES['AdvancedMemory'] = AdvancedMemory
+                except ImportError:
+                    # Fall back to SimpleMemory
+                    memory_type = 'SimpleMemory'
+            
+            memory_class = BUILTIN_MEMORIES[memory_type]
+            memory = memory_class()
+            
+        # Create brain component if not provided
+        if brain is None:
+            brain_type = config.get('brain_type', 'SimpleBrain')
+            
+            # Import custom brain type if specified
+            if brain_type not in BUILTIN_BRAINS or BUILTIN_BRAINS[brain_type] is None:
+                try:
+                    # Try to import from plugins
+                    from agentkit.brains.human_brain import HumanBrain
+                    BUILTIN_BRAINS['HumanBrain'] = HumanBrain
+                except ImportError:
+                    # Fall back to SimpleBrain
+                    brain_type = 'SimpleBrain'
+            
+            brain_class = BUILTIN_BRAINS[brain_type]
+            brain = brain_class(
+                name=name,
+                description=config.get('description', ''),
+                model=config.get('model', 'llama2'),
+                memory_manager=memory,
+                system_prompt=config.get('system_prompt', ''),
+                user_prompt=config.get('user_prompt', ''),
+                api_config=config.get('api_config', {})
+            )
+        
+        # Initialize base agent with components
         super().__init__(
             name=name,
-            description=description,
-            message_sender=message_sender,
-            bus_ip=bus_ip,
-            ttl_minutes=ttl_minutes,
-            helo_interval=helo_interval,
-            cleanup_interval=cleanup_interval
+            config=config,
+            brain=brain,
+            memory=memory,
+            message_sender=message_sender
         )
-
-        # Additional attributes specific to SimpleAgent
-        self.system_prompt = system_prompt
-        self.user_prompt = user_prompt
-        self.model = model
-        self.api_config = api_config or {}
-
-        # If needed, you could register more handlers here:
-        # self.register_message_handler(MessageType.TYPE, self.my_custom_handler)
-
-    async def send_message(self, message: Message) -> Any:
-        """
-        Send a message through the message sender component.
-
-        Args:
-            message (Message): The message to send.
-        """
-        try:
-            await self.message_sender.send_message(message)
-            logging.info(f"Agent '{self.name}' sent {message.message_type} message to {message.to}.")
-        except Exception as e:
-            logging.error(f"Error sending message to {message.to}: {e}")
-
-    def is_intended_for_me(self, message: Message) -> bool:
-        """
-        Determine if an incoming message is directed to this agent.
-
-        Args:
-            message (Message): The message to check.
-
-        Returns:
-            bool: True if the message is intended for this agent, False otherwise.
-        """
-        # Handle if 'to' is this agent's name or "ALL",
-        # or if the message is from this agent (for storing chat history).
-        for_me = (message.to == self.name or message.to == "ALL")
-        chat_by_me = (message.source == self.name and message.message_type == MessageType.CHAT)
-        not_my_helo = (message.source != self.name and message.message_type == MessageType.HELO)
-        return for_me or not_my_helo or chat_by_me
-
-    async def start(self):
-        """
-        Start the agent by running its tasks (as defined in the BaseAgent).
-        If you have extra logic specific to SimpleAgent, add it here before/after super().start().
-        """
-        logging.info(f"Agent '{self.name}' starting (SimpleAgent).")
-        await super().start()
-
-    async def stop(self):
-        """
-        Stop the agent by stopping its tasks and setting the running flag to False.
-        Ensures proper cleanup of resources including aiohttp sessions.
-        """
-        logging.info(f"Agent '{self.name}' stopping (SimpleAgent).")
-        try:
-            # Close any aiohttp sessions if they exist
-            if hasattr(self, 'message_sender') and hasattr(self.message_sender, 'session'):
-                if not self.message_sender.session.closed:
-                    await self.message_sender.session.close()
-            
-            # Call parent class stop method
-            await super().stop()
-            
-            # Allow a moment for cleanup
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            logging.error(f"Error during stop: {e}")
-
-    async def run(self):
-        """
-        Overriding run() from BaseAgent if needed. 
-        Otherwise, BaseAgent's default run loop sleeps indefinitely 
-        until stop() is called.
-        """
-        try:
-            while self.running:
-                await asyncio.sleep(0.1)  # Reduced sleep time for faster response
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            self.running = False
