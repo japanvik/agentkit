@@ -27,8 +27,8 @@ class HumanAgent(BaseAgent):
         self,
         name: str,
         config: Dict[str, Any],
-        brain: Optional['SimpleBrain'] = None,
-        memory: Optional['Memory'] = None,
+        brain: Optional['SimpleBrain'] = None, # type: ignore
+        memory: Optional['Memory'] = None, # type: ignore
         message_sender: Optional[MessageSender] = None
     ):
         """

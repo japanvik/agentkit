@@ -30,7 +30,7 @@ class SimpleAgent(BaseAgent):
         config: Dict[str, Any],
         brain: Optional[SimpleBrain] = None,
         memory: Optional[SimpleMemory] = None,
-        message_sender: Optional['MessageSender'] = None
+        message_sender: Optional['MessageSender'] = None # type: ignore
     ) -> None:
         """
         Initialize the simple agent.
