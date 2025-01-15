@@ -116,7 +116,7 @@ class BaseAgent(MessageSender):
             bool: True if message is intended for this agent, False otherwise
         """
         # Check if message is addressed to this agent or a broadcast
-        if message.to in [self.name, 'ALL']:
+        if message.to in [self.name, 'ALL'] or message.source == self.name:
             return True
             
         # Check if this agent is currently paying attention to the sender
