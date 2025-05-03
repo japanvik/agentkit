@@ -73,7 +73,7 @@ class MockMessageSender:
         self.sent_messages.append(message)
 
 
-class TestBrain(BaseBrain):
+class ConcreteBrain(BaseBrain):
     """Concrete implementation of BaseBrain for testing."""
     
     async def handle_chat_message(self, message: Message) -> None:
@@ -95,7 +95,7 @@ class TestBaseBrain:
     def brain(self):
         """Create a BaseBrain instance for testing."""
         memory = MockMemory()
-        brain = TestBrain(
+        brain = ConcreteBrain(
             name="test_brain",
             description="Test brain for testing",
             model="test_model",

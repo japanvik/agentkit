@@ -33,7 +33,7 @@ class SimpleMemory(BaseMemory):
             message: The message object to be stored (type: agentkit.messages.Message)
         """
 
-        if len(self.history) >= self.max_history_length:
+        if self.max_history_length > 0 and len(self.history) >= self.max_history_length:
             self.history.pop(0)  # Remove oldest message to maintain limit
         self.history.append(message)
 
