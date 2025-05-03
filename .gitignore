@@ -1,3 +1,32 @@
-__pycache__
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Development documents
+development_doc/*
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS specific files
 .DS_Store
-dist/*
+Thumbs.db
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
