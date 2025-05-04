@@ -48,6 +48,36 @@ Aids in the simulation and modeling of complex systems to facilitate research an
 
 Refer to the `examples` directory to see a simple chat agent implementation. Comprehensive documentation will be provided soon!
 
+### Using the AgentRunner Utility
+
+For simplified agent creation and lifecycle management, AgentKit provides the `AgentRunner` utility:
+
+```python
+import asyncio
+from agentkit.utils import AgentRunner
+
+async def main():
+    runner = AgentRunner(
+        name="Julia",
+        description="A friendly AI assistant",
+        model="ollama/qwen3",
+        system_prompt="You are a friendly and helpful AI agent."
+    )
+    
+    await runner.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+This utility handles:
+- Agent creation with sensible defaults
+- Message receiver setup and registration
+- Signal handling for graceful shutdown
+- Proper resource cleanup
+
+TODO: Add more examples of AgentRunner configuration options
+
 ## Documentation
 
 Still in the works. Refer to the source docstrings for documentation for now.

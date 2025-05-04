@@ -9,6 +9,7 @@ The BaseAgent class implements the MessageSender interface to provide communicat
 capabilities to other components through ComponentConfig.
 """
 # Standard library imports
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -304,9 +305,38 @@ class BaseAgent(MessageSender):
         """
         Stop the agent and cleanup resources.
         
-        This method stops the agent's operation and performs any necessary
-        cleanup. Subclasses should override this method to stop any
-        background tasks or services and release resources.
+        This method stops the agent's operation and performs necessary cleanup:
+        1. Sets running flag to False
+        2. Cancels all registered background tasks
+        3. Closes any open resources (e.g., client sessions)
+        4. Logs completion
+        
+        Subclasses should call super().stop() when overriding this method.
         """
+        if not self._running:
+            return
+            
         self._running = False
+        
+        # Cancel all background tasks
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # Close any resources
+        if hasattr(self, '_client_session') and self._client_session:
+            await self._client_session.close()
+            
+        # Close message sender if it has a close method
+        if self._message_sender and hasattr(self._message_sender, 'close'):
+            try:
+                await self._message_sender.close()
+                logging.info(f"Closed message sender for agent {self.name}")
+            except Exception as e:
+                logging.error(f"Error closing message sender: {e}")
+        
         logging.info(f"Agent {self.name} stopped")

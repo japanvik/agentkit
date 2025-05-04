@@ -27,6 +27,8 @@ class MessageSender(Protocol):
     
     The attention property allows components to track which entity they are
     currently focused on for communication purposes.
+    
+    The close method allows components to clean up resources when they are no longer needed.
     """
     
     @property
@@ -63,6 +65,15 @@ class MessageSender(Protocol):
         
         Args:
             message: The message object to send
+        """
+        ...
+    
+    async def close(self) -> None:
+        """
+        Close the message sender and clean up resources.
+        
+        This method is responsible for properly closing any resources used by the
+        message sender, such as network connections or client sessions.
         """
         ...
 

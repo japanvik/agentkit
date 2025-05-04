@@ -5,7 +5,7 @@
         {
             "name": "Julia",
             "description": "A helpful AI assistant.",
-            "model": "ollama/llama3.2",
+            "model": "ollama/qwen3",
             "system_prompt": "You are a friendly and helpful AI agent called {name}.",
             "agent_type": "SimpleAgent",
             "brain_type": "SimpleBrain",
