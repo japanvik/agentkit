@@ -121,7 +121,7 @@ class ConversationContext:
             The message with the specified ID, or None if no such message exists.
         """
         for message in self.history:
-            if hasattr(message, 'id') and message.id == message_id:
+            if message.id == message_id:
                 return message
         return None
     

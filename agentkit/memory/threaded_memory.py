@@ -64,8 +64,8 @@ class ThreadedMemory(BaseMemory):
         for conversation in self.conversation_manager.conversations.values():
             all_messages.extend(conversation.history)
         
-        # Sort by timestamp and limit by max_history_length
-        all_messages.sort(key=lambda m: getattr(m, 'timestamp', 0) if hasattr(m, 'timestamp') else 0)
+        # Sort by created_at and limit by max_history_length
+        all_messages.sort(key=lambda m: m.created_at)
         if self.max_history_length > 0 and len(all_messages) > self.max_history_length:
             all_messages = all_messages[-self.max_history_length:]
         
@@ -193,7 +193,7 @@ class ThreadedMemory(BaseMemory):
                 if msg.message_type == MessageType.CHAT and (msg.source == target or msg.to == target):
                     messages.append(msg)
                     
-        # Sort messages by timestamp
-        messages.sort(key=lambda m: getattr(m, 'timestamp', 0) if hasattr(m, 'timestamp') else 0)
+        # Sort messages by created_at
+        messages.sort(key=lambda m: m.created_at)
         
         return messages

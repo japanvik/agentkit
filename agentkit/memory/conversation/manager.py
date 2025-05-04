@@ -95,7 +95,7 @@ class ConversationManager:
         """
         for conv_id, conversation in self.conversations.items():
             for msg in conversation.history:
-                if hasattr(msg, 'id') and msg.id == message_id:
+                if msg.id == message_id:
                     return conv_id
         return None
     
