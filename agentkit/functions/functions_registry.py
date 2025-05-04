@@ -1,8 +1,5 @@
-from typing import Any, Dict, Protocol
-from pydantic import BaseModel, ValidationError
-from typing import Callable, List
-from typing import Any, Dict, Callable, List, Optional
-from pydantic import BaseModel
+from typing import Any, Dict, Protocol, Callable, List, Optional
+from pydantic import BaseModel, ValidationError, ConfigDict
 import inspect
 import asyncio
 import json
@@ -13,19 +10,23 @@ from agentkit.processor import JSONParseError, extract_json
 from networkkit.messages import Message
 
 class ParameterDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    
     name: str
     description: str
     required: bool
 
-    def prompt(self):
+    def prompt(self) -> str:
         return f"{self.name} ({'required' if self.required else 'optional'}): {self.description}"
 
 class FunctionDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    
     name: str
     description: str
     parameters: Optional[List[ParameterDescriptor]] = []
 
-    def prompt(self):
+    def prompt(self) -> str:
         s = f"{self.name}: {self.description}\n"
         if self.parameters:
             s += "Parameters:\n"
@@ -73,7 +74,7 @@ class DefaultFunctionsRegistry:
             prompt += descriptor.prompt() + "\n"
         return prompt
     
-    async def generate_function_request(self, state):
+    async def generate_function_request(self, state: str) -> str:
         system_prompt = FUNCTION_SYSTEM_TEMPLATE.format( functions=self.prompt())
         user_prompt = FUNCTION_USER_TEMPLATE.format(state=state)
         return await llm_processor(
@@ -107,11 +108,11 @@ class DefaultFunctionsRegistry:
         else:
             return func(**parameters)
 
-    def read_function_definitions(self, file_path):
+    def read_function_definitions(self, file_path: str) -> Dict:
         with open(file_path, 'r') as file:
             return json.load(file)
 
-    def register_functions_from_json(self, json_file):
+    def register_functions_from_json(self, json_file: str) -> None:
         function_definitions = self.read_function_definitions(json_file)
         for func_def in function_definitions:
             func = self.function_map.get(func_def['function_name'])
@@ -133,6 +134,6 @@ class DefaultFunctionsRegistry:
             m = Message(source=message.to, to=message.source, content=str(e), message_type="ERROR")
         return m
 
-    async def process_function_request(self, function_request):
-            action = extract_json(function_request)
-            return await self.execute(**action)
+    async def process_function_request(self, function_request: str) -> Any:
+        action = extract_json(function_request)
+        return await self.execute(**action)
