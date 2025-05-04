@@ -5,7 +5,7 @@ import asyncio
 import json
 from functools import partial
 from agentkit.constants import DEFAULT_LLM_MODEL, FUNCTION_SYSTEM_TEMPLATE, FUNCTION_USER_TEMPLATE
-from agentkit.processor import llm_processor
+from agentkit.processor import llm_chat
 from agentkit.processor import JSONParseError, extract_json
 from networkkit.messages import Message
 
@@ -75,12 +75,15 @@ class DefaultFunctionsRegistry:
         return prompt
     
     async def generate_function_request(self, state: str) -> str:
-        system_prompt = FUNCTION_SYSTEM_TEMPLATE.format( functions=self.prompt())
+        system_prompt = FUNCTION_SYSTEM_TEMPLATE.format(functions=self.prompt())
         user_prompt = FUNCTION_USER_TEMPLATE.format(state=state)
-        return await llm_processor(
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        return await llm_chat(
             llm_model=DEFAULT_LLM_MODEL,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt
+            messages=messages
         )
  
     async def execute(self, function: str, parameters: Optional[dict]={}) -> Any:

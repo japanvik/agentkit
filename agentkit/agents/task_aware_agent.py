@@ -48,10 +48,22 @@ class TaskAwareAgent(BaseAgent):
             config: The configuration for the agent.
             **kwargs: Additional keyword arguments.
         """
+        # Initialize functions registry if provided or create a new one
+        from agentkit.functions.functions_registry import DefaultFunctionsRegistry
+        self.functions_registry = kwargs.get('functions_registry', DefaultFunctionsRegistry())
+        
         super().__init__(name, config, **kwargs)
+        
+        # Register built-in tools
+        self.register_tools(self.functions_registry)
+        
+        # Update component_config to include functions_registry
+        self.component_config.functions_registry = self.functions_registry
+        
         # Use ThreadedMemory by default
         if not kwargs.get('memory'):
             self.memory = ThreadedMemory()
+            
         self.task_queue = asyncio.PriorityQueue()
         self._current_task: Optional[Task] = None
         self._task_processor_task: Optional[asyncio.Task] = None
@@ -141,10 +153,11 @@ class TaskAwareAgent(BaseAgent):
                     message = task.message
                     if message.message_type == MessageType.CHAT:
                         if self.brain:
-                            # Process with brain, providing conversation context
-                            response = await self.brain.handle_chat_message(message)
-                            if response:
-                                await self.send_message(response)
+                            # Determine what action to take using LLM
+                            action = await self._determine_action(task, conversation)
+                            
+                            # Execute the determined action
+                            await self._execute_action(action)
                     
                     elif message.message_type == MessageType.HELO:
                         # Respond with ACK
@@ -154,7 +167,7 @@ class TaskAwareAgent(BaseAgent):
                             content="",
                             message_type=MessageType.ACK
                         )
-                        await self.send_message(response)
+                        await self._internal_send_message(response)
                     
                     # Mark task as completed
                     task.mark_completed()
@@ -266,3 +279,123 @@ class TaskAwareAgent(BaseAgent):
             return []
         conversations = self.memory.get_active_conversations(max_age_minutes)
         return [conv.conversation_id for conv in conversations]
+    
+    async def _determine_action(self, task: Task, conversation: ConversationContext) -> Dict[str, Any]:
+        """
+        Determine what action to take for a task using LLM.
+        
+        This method uses the LLM to decide what action to take for a task, based on
+        the task message and conversation context. The LLM can decide to send a message
+        or use another tool.
+        
+        Args:
+            task: The task to determine an action for
+            conversation: The conversation context
+            
+        Returns:
+            A dictionary describing the action to take
+        """
+        import json
+        from agentkit.processor import llm_chat, extract_json
+        
+        # Set attention to the message source
+        self.component_config.message_sender.attention = task.message.source
+        
+        # Get the available tools from the functions registry
+        tools_prompt = self.functions_registry.prompt()
+        
+        # Get recent messages from the conversation
+        recent_messages = conversation.get_recent_messages(5)  # Get last 5 messages
+        context = "\n".join([f"{msg.source}: {msg.content}" for msg in recent_messages])
+        
+        # Create system prompt for the LLM
+        system_prompt = f"""
+        You are an AI assistant named {self.name}. You are processing a message and need to decide what action to take.
+        
+        Available tools:
+        {tools_prompt}
+        
+        Based on the message and conversation context, decide whether to:
+        1. Send a message using the send_message tool
+        2. Use another tool from the available tools
+        
+        Your response should be a JSON object with the following structure:
+        {{
+            "action_type": "send_message" or "use_tool",
+            "tool_name": "name of the tool to use",
+            "parameters": {{
+                "param1": "value1",
+                "param2": "value2",
+                ...
+            }}
+        }}
+        """
+        
+        # Create user prompt for the LLM
+        user_prompt = f"""
+        Message from: {task.message.source}
+        Message content: {task.message.content}
+        
+        Recent conversation context:
+        {context}
+        
+        What action should I take in response to this message?
+        """
+        
+        # Get response from LLM
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = await llm_chat(
+            llm_model=self.config.get('model', 'gpt-4'),
+            messages=messages
+        )
+        
+        try:
+            # Extract JSON from response
+            action = extract_json(response)
+            logger.debug(f"Determined action: {action}")
+            return action
+        except Exception as e:
+            logger.error(f"Error parsing LLM response for action determination: {e}")
+            # Fall back to sending a message
+            return {
+                "action_type": "send_message",
+                "tool_name": "send_message",
+                "parameters": {
+                    "recipient": task.message.source,
+                    "content": f"I'm sorry, I couldn't process your request properly. Could you please rephrase or provide more details?",
+                    "message_type": "CHAT"
+                }
+            }
+    
+    async def _execute_action(self, action: Dict[str, Any]) -> None:
+        """
+        Execute an action determined by the LLM.
+        
+        This method executes an action determined by the LLM, which could be
+        sending a message or using another tool.
+        
+        Args:
+            action: A dictionary describing the action to take
+        """
+        action_type = action.get("action_type")
+        tool_name = action.get("tool_name")
+        parameters = action.get("parameters", {})
+        
+        if action_type == "send_message" or tool_name == "send_message":
+            # Use the send_message tool
+            await self.functions_registry.execute(
+                function="send_message",
+                parameters=parameters
+            )
+        elif action_type == "use_tool" and tool_name:
+            # Use another tool
+            await self.functions_registry.execute(
+                function=tool_name,
+                parameters=parameters
+            )
+        else:
+            logger.warning(f"Unknown action type: {action_type}")

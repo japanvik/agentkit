@@ -60,7 +60,7 @@ async def test_handle_message(task_aware_agent):
     """Test handling a message with a TaskAwareAgent."""
     # Start the agent
     await task_aware_agent.start()
-    
+
     try:
         # Create a mock message
         message = Message(
@@ -69,23 +69,28 @@ async def test_handle_message(task_aware_agent):
             content="Test message",
             message_type=MessageType.CHAT
         )
-        
-        # Mock the brain's handle_chat_message method
-        task_aware_agent.brain = MagicMock()
-        task_aware_agent.brain.handle_chat_message = MagicMock(
-            return_value=asyncio.Future()
-        )
-        task_aware_agent.brain.handle_chat_message.return_value.set_result(None)
-        
+
+        # Mock the task_queue.put method to capture the task
+        original_put = task_aware_agent.task_queue.put
+        task_aware_agent.task_queue.put = MagicMock(wraps=original_put)
+
         # Handle the message
         await task_aware_agent.handle_message(message)
-        
+
         # Wait for the task to be processed
         await asyncio.sleep(0.1)
+
+        # Verify that task_queue.put was called (a task was added to the queue)
+        task_aware_agent.task_queue.put.assert_called_once()
         
-        # Verify the brain's handle_chat_message method was called
-        task_aware_agent.brain.handle_chat_message.assert_called_once_with(message)
+        # Get the task from the call arguments
+        call_args = task_aware_agent.task_queue.put.call_args
+        _, task = call_args[0][0]  # Extract the task from the priority tuple
         
+        # Verify the task has the expected properties
+        assert task.conversation_id is not None
+        assert "Process CHAT message from Sender" in task.description
+
     finally:
         # Stop the agent
         await task_aware_agent.stop()

@@ -91,7 +91,9 @@ class ComponentConfig:
         agent_name (str): Name of the agent this component belongs to
         config (Dict[str, Any]): Agent configuration dictionary containing settings
         message_sender (MessageSender): Interface for sending messages and managing attention
+        functions_registry (Optional): Registry of functions/tools available to the agent
     """
     agent_name: str
     config: Dict[str, Any]
     message_sender: MessageSender
+    functions_registry: Optional[Any] = None

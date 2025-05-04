@@ -182,11 +182,11 @@ class BaseAgent(MessageSender):
         """
         self._attention = value
     
-    async def send_message(self, message: Message) -> None:
+    async def _internal_send_message(self, message: Message) -> None:
         """
-        Send a message, delegating to message_sender if provided.
+        Internal implementation of message sending, delegating to message_sender if provided.
         
-        This method handles message sending, either by delegating to an external
+        This method handles the actual message sending, either by delegating to an external
         message sender (if provided during initialization) or by implementing
         the sending logic in subclasses. If no message_sender was provided and
         this method is not overridden in a subclass, the message will not be sent.
@@ -196,6 +196,61 @@ class BaseAgent(MessageSender):
         """
         if self._message_sender:
             await self._message_sender.send_message(message)
+    
+    async def send_message(self, message: Message) -> None:
+        """
+        Send a message, using the send_message tool if available, otherwise falling back to internal implementation.
+        
+        This method provides backward compatibility with existing code that calls send_message directly.
+        In the new architecture, sending messages should be done through the functions registry using
+        the send_message tool.
+        
+        Args:
+            message: Message object to send
+        """
+        # For backward compatibility, use the internal implementation
+        await self._internal_send_message(message)
+    
+    def register_tools(self, functions_registry) -> None:
+        """
+        Register agent tools with the functions registry.
+        
+        This method registers built-in tools like send_message with the functions registry,
+        making them available for use by the agent and its components.
+        
+        Args:
+            functions_registry: The functions registry to register tools with
+        """
+        from functools import partial
+        from agentkit.functions.built_in_tools import send_message_tool
+        from agentkit.functions.functions_registry import FunctionDescriptor, ParameterDescriptor
+        
+        # Register send_message tool
+        send_message_fn = partial(send_message_tool, self)
+        
+        descriptor = FunctionDescriptor(
+            name="send_message",
+            description="Send a message to another agent or entity",
+            parameters=[
+                ParameterDescriptor(
+                    name="recipient",
+                    description="The name of the recipient",
+                    required=True
+                ),
+                ParameterDescriptor(
+                    name="content",
+                    description="The message content",
+                    required=True
+                ),
+                ParameterDescriptor(
+                    name="message_type",
+                    description="The type of message (default: CHAT)",
+                    required=False
+                )
+            ]
+        )
+        
+        functions_registry.register_function(send_message_fn, descriptor)
     
     def is_intended_for_me(self, message: Message) -> bool:
         """
