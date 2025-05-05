@@ -8,7 +8,8 @@ from networkkit.messages import Message, MessageType
 # Built-in implementations
 BUILTIN_BRAINS = {
     "SimpleBrain": SimpleBrain,
-    "HumanBrain": None  # Imported on demand to avoid circular imports
+    "HumanBrain": None,  # Imported on demand to avoid circular imports
+    "ToolBrain": None    # Imported on demand to avoid circular imports
 }
 
 BUILTIN_MEMORIES = {
@@ -67,8 +68,12 @@ class SimpleAgent(BaseAgent):
             if brain_type not in BUILTIN_BRAINS or BUILTIN_BRAINS[brain_type] is None:
                 try:
                     # Try to import from plugins
-                    from agentkit.brains.human_brain import HumanBrain
-                    BUILTIN_BRAINS['HumanBrain'] = HumanBrain
+                    if brain_type == 'HumanBrain':
+                        from agentkit.brains.human_brain import HumanBrain
+                        BUILTIN_BRAINS['HumanBrain'] = HumanBrain
+                    elif brain_type == 'ToolBrain':
+                        from agentkit.brains.tool_brain import ToolBrain
+                        BUILTIN_BRAINS['ToolBrain'] = ToolBrain
                 except ImportError:
                     # Fall back to SimpleBrain
                     brain_type = 'SimpleBrain'

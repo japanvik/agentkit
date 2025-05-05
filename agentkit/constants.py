@@ -110,6 +110,9 @@ Function: {{"function": "add_numbers", "parameters": {{"x": 10, "y": 20}}}}
 Here is an example of a function call with no parameters. DO NOT add any "parameters" section for functions with no parameters:
 Function: {{"function": "print_hello"}}
 
+For the send_message function, always set the recipient parameter to the name of the person who sent you the message. For example:
+Function: {{"function": "send_message", "parameters": {{"recipient": "Vik", "content": "Hello! How can I help you today?", "message_type": "CHAT"}}}}
+
 Available functions:
 {functions}
 """

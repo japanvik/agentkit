@@ -48,6 +48,9 @@ class FunctionsRegistry(Protocol):
 
     def execute(self, function: str, parameters: Optional[dict]) -> Any:
         ...
+        
+    def has_function(self, function: str) -> bool:
+        ...
 
 
 class FunctionsRegistryError(ValueError):
@@ -140,3 +143,15 @@ class DefaultFunctionsRegistry:
     async def process_function_request(self, function_request: str) -> Any:
         action = extract_json(function_request)
         return await self.execute(**action)
+        
+    def has_function(self, function: str) -> bool:
+        """
+        Check if a function is registered in the registry.
+        
+        Args:
+            function: The name of the function to check
+            
+        Returns:
+            bool: True if the function is registered, False otherwise
+        """
+        return function in self.function_map
