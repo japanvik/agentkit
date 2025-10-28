@@ -16,6 +16,7 @@ from rich.prompt import Prompt
 rich_console = Console()
 # Initialize a ThreadPoolExecutor for handling blocking I/O
 executor = ThreadPoolExecutor(max_workers=2)
+logger = logging.getLogger(__name__)
 
 class HumanAgent(BaseAgent):
     """
@@ -58,11 +59,11 @@ class HumanAgent(BaseAgent):
         await super().start()
         
         # Create and start user input task
-        self._tasks.append(asyncio.create_task(
+        self.create_background_task(
             self.handle_user_input(),
             name=f"{self.name}-user-input"
-        ))
-        logging.info(f"Started user input task for {self.name}")
+        )
+        logger.info("Started user input task for %s", self.name)
 
     async def handle_chat_message(self, message: Message) -> None:
         """
@@ -71,11 +72,11 @@ class HumanAgent(BaseAgent):
         Args:
             message (Message): The incoming message object.
         """
-        logging.info(f"Human Agent '{self.name}' received CHAT message: {message.content}")
+        logger.info("Human Agent '%s' received CHAT message: %s", self.name, message.content)
         try:
             sender = message.source
             content = message.content
-            logging.debug("A. Attempting to get color")
+            logger.debug("A. Attempting to get color")
 
             # Default color scheme
             agent_colors = {
@@ -84,18 +85,18 @@ class HumanAgent(BaseAgent):
                 "Error": "red"
             }
             color = agent_colors.get(sender, "cyan")
-            logging.debug(f"B. got {color} as agent color")
+            logger.debug("B. got %s as agent color", color)
 
             formatted_message = f"[bold {color}]{sender}[/bold {color}]: {content}"
-            logging.debug(f"C. message is {formatted_message}")
+            logger.debug("C. message is %s", formatted_message)
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             # Offload the blocking print to the executor
-            logging.debug("D. Attempting to print the formatted message to console...")
+            logger.debug("D. Attempting to print the formatted message to console...")
             await loop.run_in_executor(executor, rich_console.print, formatted_message)
 
         except Exception as e:
-            logging.error(f"Error handling CHAT message from {sender}: {e}")
+            logger.error("Error handling CHAT message from %s: %s", sender, e, exc_info=True)
 
     async def handle_user_input(self):
         """
@@ -103,10 +104,10 @@ class HumanAgent(BaseAgent):
         Supports @ALL for broadcasting and comma-separated @Agent1,@Agent2 for multiple targets.
         Also supports commands like /ls.
         """
-        logging.info(f"User input handler started for {self.name}")
+        logger.info("User input handler started for %s", self.name)
         while self._running:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 # Offload the blocking Prompt.ask to the executor
                 prompt = f"[bold cyan]{self.name}[/bold cyan]> "
                 user_input = await loop.run_in_executor(executor, Prompt.ask, prompt)
@@ -122,7 +123,11 @@ class HumanAgent(BaseAgent):
                         await self.list_available_agents()
                     else:
                         # Offload the blocking print to the executor
-                        await loop.run_in_executor(executor, rich_console.print, f"[bold red]Unknown command: {command}[/bold red]")
+                        await loop.run_in_executor(
+                            executor,
+                            rich_console.print,
+                            f"[bold red]Unknown command: {command}[/bold red]"
+                        )
                     continue
 
                 # Regex to parse @ALL or multiple @Agent1,@Agent2
@@ -152,14 +157,14 @@ class HumanAgent(BaseAgent):
                     await self.send_message(message)
 
             except Exception as e:
-                logging.error(f"Error handling user input: {e}")
+                logger.error("Error handling user input: %s", e, exc_info=True)
                 await asyncio.sleep(1)  # Prevent tight loop on error
 
     async def list_available_agents(self):
         """
         Displays the list of currently available agents.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(executor, rich_console.print, "\n[bold underline]Available Agents:[/bold underline]")
         await loop.run_in_executor(
             executor,
@@ -177,7 +182,7 @@ class HumanAgent(BaseAgent):
         Returns:
             bool: True if the message is intended for this agent, False otherwise.
         """
-        logging.debug(f"Checking if message is intended for {self.name}: {message}")
+        logger.debug("Checking if message is intended for %s: %s", self.name, message)
         for_me = (message.to == self.name or message.to == "ALL")
         chat_by_me = (message.source == self.name and message.message_type == MessageType.CHAT)
         not_my_helo = (message.source != self.name and message.message_type == MessageType.HELO)

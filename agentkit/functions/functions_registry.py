@@ -1,13 +1,15 @@
 from typing import Any, Dict, Protocol, Callable, List, Optional
-from pydantic import BaseModel, ValidationError, ConfigDict
+from pydantic import BaseModel, ValidationError, ConfigDict, Field
 import inspect
-import asyncio
 import json
 from functools import partial
 from agentkit.constants import DEFAULT_LLM_MODEL, FUNCTION_SYSTEM_TEMPLATE, FUNCTION_USER_TEMPLATE
 from agentkit.processor import llm_chat
 from agentkit.processor import JSONParseError, extract_json
-from networkkit.messages import Message
+from networkkit.messages import Message, MessageType
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ParameterDescriptor(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -24,7 +26,7 @@ class FunctionDescriptor(BaseModel):
     
     name: str
     description: str
-    parameters: Optional[List[ParameterDescriptor]] = []
+    parameters: List[ParameterDescriptor] = Field(default_factory=list)
 
     def prompt(self) -> str:
         s = f"{self.name}: {self.description}\n"
@@ -65,6 +67,8 @@ class DefaultFunctionsRegistry:
     def register_function(self, fn: Callable, descriptor: FunctionDescriptor) -> None:
         if not isinstance(descriptor, FunctionDescriptor):
             raise TypeError("Descriptor must be an instance of FunctionDescriptor")
+        if descriptor.name in self.function_registry:
+            raise FunctionsRegistryError(f"Function {descriptor.name} is already registered")
         self.function_registry[descriptor.name] = descriptor
         self.function_map[descriptor.name] = fn
         
@@ -89,17 +93,18 @@ class DefaultFunctionsRegistry:
             messages=messages
         )
  
-    async def execute(self, function: str, parameters: Optional[dict]={}) -> Any:
+    async def execute(self, function: str, parameters: Optional[dict] = None) -> Any:
         if function not in self.function_map:
             raise FunctionsRegistryError(f"Function {function} is not registered")
 
         func = self.function_map[function]
         func_descriptor = self.function_registry.get(function)
+        params = parameters or {}
 
         # Optional: Validate that required parameters are provided
         if func_descriptor:
             for param in func_descriptor.parameters:
-                if param.required and param.name not in parameters:
+                if param.required and param.name not in params:
                     raise FunctionsRegistryError(f"Missing required parameter: {param.name}. for function {func_descriptor.name}. make sure to add this in your JSON.")
 
         # Check if the function is a coroutine
@@ -110,9 +115,9 @@ class DefaultFunctionsRegistry:
 
         # Check if the actual function is a coroutine
         if inspect.iscoroutinefunction(actual_func):
-            return await func(**parameters)
+            return await func(**params)
         else:
-            return func(**parameters)
+            return func(**params)
 
     def read_function_definitions(self, file_path: str) -> Dict:
         with open(file_path, 'r') as file:
@@ -131,13 +136,19 @@ class DefaultFunctionsRegistry:
                 self.register_function(func, descriptor)
     
     async def execute_function_from_message(self, message:Message) -> Message:
-        if message.message_type == "ERROR":
+        if message.message_type in (MessageType.ERROR, "ERROR"):
             return message
         function_request = await self.generate_function_request(state=message.content)
         try:
             m = await self.process_function_request(function_request)
         except (JSONParseError, FunctionsRegistryError, TypeError, ValidationError) as e:
-            m = Message(source=message.to, to=message.source, content=str(e), message_type="ERROR")
+            logger.exception("Failed to execute function from message")
+            m = Message(
+                source=message.to,
+                to=message.source,
+                content=str(e),
+                message_type=MessageType.ERROR
+            )
         return m
 
     async def process_function_request(self, function_request: str) -> Any:
