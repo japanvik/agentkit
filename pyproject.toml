@@ -16,6 +16,7 @@ python = ">=3.8"
 networkkit = ">=0.0.2"
 litellm = "*"
 python-dotenv = "*"
+rich = "*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"

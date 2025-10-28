@@ -72,23 +72,23 @@ class TaskAwareAgent(BaseAgent):
         """Start the agent and the task processor."""
         await super().start()
         # Start task processor
-        self._task_processor_task = asyncio.create_task(self._process_tasks())
-        self._tasks.append(self._task_processor_task)
+        self._task_processor_task = self.create_background_task(
+            self._process_tasks(),
+            name=f"{self.name}-task-processor"
+        )
         
     async def stop(self) -> None:
         """Stop the agent and the task processor."""
-        # Cancel the task processor task
-        if self._task_processor_task and not self._task_processor_task.done():
-            self._task_processor_task.cancel()
+        task = self._task_processor_task
+        self._task_processor_task = None
+        
+        if task and not task.done():
+            task.cancel()
             try:
-                await self._task_processor_task
+                await task
             except asyncio.CancelledError:
                 pass
         
-        # Clear the tasks list
-        self._tasks.clear()
-        
-        # Call the parent class's stop method
         await super().stop()
     
     async def handle_message(self, message: Message) -> None:

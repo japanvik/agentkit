@@ -11,7 +11,7 @@ capabilities to other components through ComponentConfig.
 # Standard library imports
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional, TypeVar
 
 # Third-party imports
 from networkkit.messages import Message, MessageType
@@ -20,6 +20,9 @@ from networkkit.messages import Message, MessageType
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.common.interfaces import ComponentConfig, MessageSender
 from agentkit.memory.memory_protocol import Memory
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 class BaseAgent(MessageSender):
     """
@@ -43,7 +46,7 @@ class BaseAgent(MessageSender):
         _attention (Optional[str]): The current attention target
         _message_sender (Optional[MessageSender]): External message sender if provided
         _running (bool): Flag indicating if the agent is currently running
-        _tasks (List[Awaitable]): List of background tasks
+        _tasks (List[asyncio.Task]): List of background tasks
     """
     
     def __init__(
@@ -77,7 +80,7 @@ class BaseAgent(MessageSender):
         self._attention: Optional[str] = None
         self._message_sender = message_sender
         self._running = False
-        self._tasks: List[Awaitable] = []
+        self._tasks: List[asyncio.Task[Any]] = []
         self.message_handlers: Dict[MessageType, List[Callable]] = {}
         
         # Create component config with self as MessageSender
@@ -306,8 +309,8 @@ class BaseAgent(MessageSender):
             for handler in handlers:
                 try:
                     await handler(message)
-                except Exception as e:
-                    logging.error(f"Error in message handler: {e}")
+                except Exception:
+                    logger.exception("Error in message handler")
             return
 
         # Default handling if no handlers registered
@@ -354,7 +357,61 @@ class BaseAgent(MessageSender):
             return
             
         self._running = True
-        logging.info(f"Agent {self.name} started")
+        logger.info("Agent %s started", self.name)
+
+    def _track_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+        """
+        Track a background task and ensure cleanup when it completes.
+        """
+        self._tasks.append(task)
+
+        def _cleanup(completed: asyncio.Task[Any]) -> None:
+            if completed in self._tasks:
+                self._tasks.remove(completed)
+            try:
+                completed.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                task_name = completed.get_name() if hasattr(completed, "get_name") else None
+                logger.exception(
+                    "Background task %s raised an exception",
+                    task_name or "<unnamed>",
+                )
+
+        task.add_done_callback(_cleanup)
+        return task
+
+    def create_background_task(
+        self,
+        coro: Coroutine[Any, Any, T],
+        *,
+        name: Optional[str] = None,
+    ) -> asyncio.Task[T]:
+        """
+        Create and track a background task associated with this agent.
+
+        Args:
+            coro: Coroutine object to execute in the background.
+            name: Optional task name for easier debugging.
+
+        Returns:
+            asyncio.Task: The created task.
+        """
+        task = asyncio.create_task(coro, name=name)
+        return self._track_task(task)
+
+    def track_task(self, task: asyncio.Task[T]) -> asyncio.Task[T]:
+        """
+        Track an externally created task so it participates in agent shutdown.
+
+        Args:
+            task: The task to track.
+
+        Returns:
+            The same task instance for convenience.
+        """
+        return self._track_task(task)
     
     async def stop(self) -> None:
         """
@@ -374,13 +431,14 @@ class BaseAgent(MessageSender):
         self._running = False
         
         # Cancel all background tasks
-        for task in self._tasks:
+        for task in list(self._tasks):
             if not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._tasks.clear()
         
         # Close any resources
         if hasattr(self, '_client_session') and self._client_session:
@@ -390,8 +448,8 @@ class BaseAgent(MessageSender):
         if self._message_sender and hasattr(self._message_sender, 'close'):
             try:
                 await self._message_sender.close()
-                logging.info(f"Closed message sender for agent {self.name}")
-            except Exception as e:
-                logging.error(f"Error closing message sender: {e}")
+                logger.info("Closed message sender for agent %s", self.name)
+            except Exception:
+                logger.exception("Error closing message sender")
         
-        logging.info(f"Agent {self.name} stopped")
+        logger.info("Agent %s stopped", self.name)
