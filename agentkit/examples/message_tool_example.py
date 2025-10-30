@@ -13,7 +13,10 @@ from typing import Dict, Any
 from networkkit.messages import Message, MessageType
 
 from agentkit.agents.task_aware_agent import TaskAwareAgent
-from agentkit.functions.functions_registry import DefaultFunctionsRegistry, FunctionDescriptor, ParameterDescriptor
+from agentkit.functions.functions_registry import (
+    DefaultFunctionsRegistry,
+    ToolExecutionContext,
+)
 
 
 async def main():
@@ -49,7 +52,8 @@ async def main():
                 "recipient": "Agent2",
                 "content": "Hello from Agent1!",
                 "message_type": "CHAT"
-            }
+            },
+            context=ToolExecutionContext(agent=agent1)
         )
         logging.info(f"Message sent: {result}")
 
@@ -64,7 +68,8 @@ async def main():
                 "recipient": "Agent1",
                 "content": "Hello back from Agent2!",
                 "message_type": "CHAT"
-            }
+            },
+            context=ToolExecutionContext(agent=agent2)
         )
         logging.info(f"Message sent: {result}")
 

@@ -224,12 +224,15 @@ class BaseAgent(MessageSender):
         Args:
             functions_registry: The functions registry to register tools with
         """
-        from functools import partial
         from agentkit.functions.built_in_tools import send_message_tool
-        from agentkit.functions.functions_registry import FunctionDescriptor, ParameterDescriptor
-        
-        # Register send_message tool
-        send_message_fn = partial(send_message_tool, self)
+        from agentkit.functions.execution_tools import (
+            python_execution_tool,
+            shell_command_tool,
+        )
+        from agentkit.functions.functions_registry import (
+            FunctionDescriptor,
+            ParameterDescriptor,
+        )
         
         descriptor = FunctionDescriptor(
             name="send_message",
@@ -253,7 +256,72 @@ class BaseAgent(MessageSender):
             ]
         )
         
-        functions_registry.register_function(send_message_fn, descriptor)
+        if functions_registry.has_function("send_message"):
+            return
+        
+        functions_registry.register_function(
+            send_message_tool,
+            descriptor,
+            pass_context=True,
+        )
+
+        if not functions_registry.has_function("python_execute"):
+            descriptor = FunctionDescriptor(
+                name="python_execute",
+                description="Execute Python code in a sandboxed subprocess.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="code",
+                        description="Python code snippet to execute.",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="timeout",
+                        description="Maximum execution time in seconds (default 15).",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="python_path",
+                        description="Optional path to the Python interpreter.",
+                        required=False,
+                    ),
+                ],
+                categories=["execution"],
+            )
+            functions_registry.register_function(
+                python_execution_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("shell_command"):
+            descriptor = FunctionDescriptor(
+                name="shell_command",
+                description="Execute a shell command using bash.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="command",
+                        description="Shell command to execute.",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="timeout",
+                        description="Maximum execution time in seconds (default 15).",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="working_dir",
+                        description="Optional working directory for the command.",
+                        required=False,
+                    ),
+                ],
+                categories=["execution"],
+            )
+            functions_registry.register_function(
+                shell_command_tool,
+                descriptor,
+                pass_context=True,
+            )
     
     def is_intended_for_me(self, message: Message) -> bool:
         """

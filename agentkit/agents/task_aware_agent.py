@@ -18,6 +18,7 @@ from agentkit.agents.base_agent import BaseAgent
 from agentkit.memory.threaded_memory import ThreadedMemory
 from agentkit.memory.conversation.task import Task
 from agentkit.memory.conversation.context import ConversationContext
+from agentkit.functions.functions_registry import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -389,13 +390,15 @@ class TaskAwareAgent(BaseAgent):
             # Use the send_message tool
             await self.functions_registry.execute(
                 function="send_message",
-                parameters=parameters
+                parameters=parameters,
+                context=ToolExecutionContext(agent=self),
             )
         elif action_type == "use_tool" and tool_name:
             # Use another tool
             await self.functions_registry.execute(
                 function=tool_name,
-                parameters=parameters
+                parameters=parameters,
+                context=ToolExecutionContext(agent=self),
             )
         else:
             logger.warning(f"Unknown action type: {action_type}")

@@ -113,6 +113,7 @@ def simple_agent_factory(
         'user_prompt': user_prompt,
         'api_config': api_config,
         'bus_ip': bus_ip,
+        'bus_publish_address': f"http://{bus_ip}:8000",
         'ttl_minutes': ttl_minutes,
         'helo_interval': helo_interval,
         'cleanup_interval': cleanup_interval,

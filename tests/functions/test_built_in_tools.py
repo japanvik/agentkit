@@ -12,7 +12,12 @@ from networkkit.messages import Message, MessageType
 
 from agentkit.agents.base_agent import BaseAgent
 from agentkit.functions.built_in_tools import send_message_tool
-from agentkit.functions.functions_registry import DefaultFunctionsRegistry, FunctionDescriptor, ParameterDescriptor
+from agentkit.functions.functions_registry import (
+    DefaultFunctionsRegistry,
+    FunctionDescriptor,
+    ParameterDescriptor,
+    ToolExecutionContext,
+)
 
 
 @pytest.fixture
@@ -29,7 +34,7 @@ async def test_send_message_tool(mock_agent):
     """Test that the send_message tool sends a message correctly."""
     # Call the send_message tool
     result = await send_message_tool(
-        mock_agent,
+        ToolExecutionContext(agent=mock_agent),
         recipient="recipient",
         content="Hello, world!",
         message_type="CHAT"
@@ -73,6 +78,8 @@ async def test_register_tools():
     
     # Check that the send_message tool was registered
     assert "send_message" in registry.function_map
+    assert "python_execute" in registry.function_map
+    assert "shell_command" in registry.function_map
     
     # Check that the function descriptor has the expected properties
     descriptor = registry.function_registry["send_message"]
@@ -128,11 +135,14 @@ async def test_task_aware_agent_uses_send_message_tool():
     await agent._execute_action(action)
     
     # Check that the functions registry's execute method was called with the correct arguments
+    from unittest.mock import ANY
+
     agent.functions_registry.execute.assert_called_once_with(
         function="send_message",
         parameters={
             "recipient": "recipient",
             "content": "Hello, world!",
             "message_type": "CHAT"
-        }
+        },
+        context=ANY,
     )

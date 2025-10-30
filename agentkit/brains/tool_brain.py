@@ -7,7 +7,7 @@ import json
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.memory.memory_protocol import Memory
 from agentkit.processor import llm_chat, extract_json
-from agentkit.functions.functions_registry import DefaultFunctionsRegistry
+from agentkit.functions.functions_registry import DefaultFunctionsRegistry, ToolExecutionContext
 from networkkit.messages import Message
 from agentkit.constants import FUNCTION_SYSTEM_TEMPLATE
 
@@ -111,13 +111,25 @@ class ToolBrain(SimpleBrain):
                     function_name = function_data["function"]
                     parameters = function_data.get("parameters", {})
                     
+                    tool_context = ToolExecutionContext(
+                        agent=self.component_config.message_sender
+                    )
+
                     if function_name == "send_message":
                         # Always set the recipient to the message source to ensure correct routing
                         parameters["recipient"] = message.source
-                        await self.functions_registry.execute("send_message", parameters)
+                        await self.functions_registry.execute(
+                            "send_message",
+                            parameters,
+                            context=tool_context,
+                        )
                     elif self.functions_registry.has_function(function_name):
                         # Execute other registered functions
-                        await self.functions_registry.execute(function_name, parameters)
+                        await self.functions_registry.execute(
+                            function_name,
+                            parameters,
+                            context=tool_context,
+                        )
                     else:
                         # Function doesn't exist, convert to a regular message
                         logging.warning(f"Function '{function_name}' not found in registry. Converting to regular message.")
