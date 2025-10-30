@@ -10,15 +10,17 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from networkkit.messages import Message, MessageType
 
 from agentkit.agents.base_agent import BaseAgent
-from agentkit.memory.threaded_memory import ThreadedMemory
-from agentkit.memory.conversation.task import Task
-from agentkit.memory.conversation.context import ConversationContext
 from agentkit.functions.functions_registry import ToolExecutionContext
+from agentkit.memory.conversation.context import ConversationContext
+from agentkit.memory.conversation.task import Task
+from agentkit.memory.threaded_memory import ThreadedMemory
+from agentkit.planning import AgentPlanner, PlannerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +70,21 @@ class TaskAwareAgent(BaseAgent):
         self.task_queue = asyncio.PriorityQueue()
         self._current_task: Optional[Task] = None
         self._task_processor_task: Optional[asyncio.Task] = None
+
+        persistence_root = Path(
+            self.config.get("planner_state_dir", "agent_state")
+        )
+        planner_config = PlannerConfig(persistence_dir=persistence_root)
+        self.planner = AgentPlanner(
+            self,
+            config=planner_config,
+            functions_registry=self.functions_registry,
+        )
     
     async def start(self) -> None:
         """Start the agent and the task processor."""
         await super().start()
+        await self.planner.start()
         # Start task processor
         self._task_processor_task = self.create_background_task(
             self._process_tasks(),
@@ -90,6 +103,7 @@ class TaskAwareAgent(BaseAgent):
             except asyncio.CancelledError:
                 pass
         
+        await self.planner.stop()
         await super().stop()
     
     async def handle_message(self, message: Message) -> None:
@@ -152,26 +166,19 @@ class TaskAwareAgent(BaseAgent):
                     
                     # Process task based on message type
                     message = task.message
-                    if message.message_type == MessageType.CHAT:
-                        if self.brain:
-                            # Determine what action to take using LLM
-                            action = await self._determine_action(task, conversation)
-                            
-                            # Execute the determined action
-                            await self._execute_action(action)
-                    
-                    elif message.message_type == MessageType.HELO:
-                        # Respond with ACK
-                        response = Message(
-                            source=self.name,
-                            to=message.source,
-                            content="",
-                            message_type=MessageType.ACK
-                        )
-                        await self._internal_send_message(response)
-                    
-                    # Mark task as completed
-                    task.mark_completed()
+                    action = await self.planner.plan_for_message(
+                        message,
+                        task.conversation_id,
+                    )
+
+                    completed = await self._execute_action(
+                        action,
+                        conversation_id=task.conversation_id,
+                        source_message=message,
+                    )
+
+                    if completed:
+                        task.mark_completed()
                     
                 except Exception as e:
                     logger.error(f"Error processing task: {e}", exc_info=True)
@@ -372,7 +379,13 @@ class TaskAwareAgent(BaseAgent):
                 }
             }
     
-    async def _execute_action(self, action: Dict[str, Any]) -> None:
+    async def _execute_action(
+        self,
+        action: Dict[str, Any],
+        *,
+        conversation_id: Optional[str] = None,
+        source_message: Optional[Message] = None,
+    ) -> bool:
         """
         Execute an action determined by the LLM.
         
@@ -386,19 +399,36 @@ class TaskAwareAgent(BaseAgent):
         tool_name = action.get("tool_name")
         parameters = action.get("parameters", {})
         
+        if action_type == "noop":
+            return True
+
         if action_type == "send_message" or tool_name == "send_message":
-            # Use the send_message tool
             await self.functions_registry.execute(
                 function="send_message",
                 parameters=parameters,
                 context=ToolExecutionContext(agent=self),
             )
-        elif action_type == "use_tool" and tool_name:
-            # Use another tool
-            await self.functions_registry.execute(
+            return True
+
+        if action_type == "use_tool" and tool_name:
+            result = await self.functions_registry.execute(
                 function=tool_name,
                 parameters=parameters,
                 context=ToolExecutionContext(agent=self),
             )
-        else:
-            logger.warning(f"Unknown action type: {action_type}")
+            if conversation_id and source_message:
+                follow_up = await self.planner.notify_tool_result(
+                    conversation_id=conversation_id,
+                    result=result or {},
+                    original_message=source_message,
+                )
+                if follow_up.get("action_type") and follow_up.get("tool_name"):
+                    return await self._execute_action(
+                        follow_up,
+                        conversation_id=conversation_id,
+                        source_message=source_message,
+                    )
+            return True
+
+        logger.warning(f"Unknown action type: {action_type}")
+        return False

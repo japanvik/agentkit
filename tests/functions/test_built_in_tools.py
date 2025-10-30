@@ -80,6 +80,7 @@ async def test_register_tools():
     assert "send_message" in registry.function_map
     assert "python_execute" in registry.function_map
     assert "shell_command" in registry.function_map
+    assert "schedule_reminder" in registry.function_map
     
     # Check that the function descriptor has the expected properties
     descriptor = registry.function_registry["send_message"]
@@ -132,7 +133,17 @@ async def test_task_aware_agent_uses_send_message_tool():
     }
     
     # Call the _execute_action method
-    await agent._execute_action(action)
+    source_message = Message(
+        source="recipient",
+        to="test_agent",
+        content="Hello",
+        message_type=MessageType.CHAT,
+    )
+    await agent._execute_action(
+        action,
+        conversation_id="conv1",
+        source_message=source_message,
+    )
     
     # Check that the functions registry's execute method was called with the correct arguments
     from unittest.mock import ANY

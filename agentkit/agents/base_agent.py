@@ -229,6 +229,7 @@ class BaseAgent(MessageSender):
             python_execution_tool,
             shell_command_tool,
         )
+        from agentkit.functions.reminder_tools import schedule_reminder_tool
         from agentkit.functions.functions_registry import (
             FunctionDescriptor,
             ParameterDescriptor,
@@ -319,6 +320,50 @@ class BaseAgent(MessageSender):
             )
             functions_registry.register_function(
                 shell_command_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("schedule_reminder"):
+            descriptor = FunctionDescriptor(
+                name="schedule_reminder",
+                description="Schedule a reminder that sends a message at a future time.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="content",
+                        description="Reminder message content",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="recipient",
+                        description="Optional reminder recipient (default self)",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="run_at",
+                        description="ISO timestamp when the reminder should trigger",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="delay_seconds",
+                        description="Delay before reminder triggers, in seconds",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="repeat_seconds",
+                        description="If provided, reminder repeats at this interval (seconds)",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="description",
+                        description="Optional description for planner tracking",
+                        required=False,
+                    ),
+                ],
+                categories=["reminder"],
+            )
+            functions_registry.register_function(
+                schedule_reminder_tool,
                 descriptor,
                 pass_context=True,
             )
