@@ -3,11 +3,21 @@ import os
 import re
 from typing import Dict, List, Optional
 
+import logging
 from dotenv import load_dotenv
 from litellm import acompletion
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Quiet verbose LiteLLM debug logging
+for logger_name in (
+    "litellm",
+    "litellm.litellm_core_utils",
+    "litellm.utils",
+    "litellm.llms",
+):
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 class JSONParseError(ValueError):
     """

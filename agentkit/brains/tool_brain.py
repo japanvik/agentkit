@@ -104,87 +104,79 @@ class ToolBrain(SimpleBrain):
         if message.source != self.name:
             # Reply to a chat message from someone
             self.component_config.message_sender.attention = message.source
-            max_attempts = 3
-            extra_prompt = ""
-            last_response = None
+            response = await self.generate_chat_response()
 
-            for attempt in range(max_attempts):
-                response = await self.generate_chat_response(extra_prompt)
-                last_response = response
-
-                try:
-                    function_data = extract_json(response.content)
-                except Exception as exc:
-                    logging.warning(
-                        "Failed to parse function call attempt %s: %s",
-                        attempt + 1,
-                        exc,
+            try:
+                function_data = extract_json(response.content)
+            except Exception as exc:
+                logging.warning(
+                    "Failed to parse function call: %s",
+                    exc,
+                )
+                if response and response.content:
+                    logging.debug("LLM raw response: %s", response.content)
+                    content = response.content.strip()
+                    if content:
+                        content += (
+                            "\n\n(Note: I couldn't interpret this as a tool action, "
+                            "so I'm responding directly.)"
+                        )
+                else:
+                    content = (
+                        "I'm having trouble interpreting the response right now. "
+                        "Please try again."
                     )
-                    if attempt == max_attempts - 1:
-                        if last_response:
-                            tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
-                            content = last_response.content.strip()
-                            if content:
-                                content += "\n\n"
-                            content += (
-                                "(For reference, available tools: "
-                                f"{tools}.)"
-                            )
-                            last_response.content = content
-                            await self.component_config.message_sender.send_message(last_response)
-                        return
-
-                    extra_prompt = (
-                        "Reminder: respond with exactly one JSON object describing a function call "
-                        "using the format Function: {\"function\": \"name\", \"parameters\": {...}}."
-                    )
-                    continue
-
-                if "function" in function_data:
-                    function_name = function_data["function"]
-                    parameters = function_data.get("parameters", {})
-
-                    tool_context = ToolExecutionContext(
-                        agent=self.component_config.message_sender
-                    )
-
-                    if function_name == "send_message":
-                        parameters["recipient"] = message.source
-                        await self.functions_registry.execute(
-                            "send_message",
-                            parameters,
-                            context=tool_context,
-                        )
-                    elif self.functions_registry.has_function(function_name):
-                        await self.functions_registry.execute(
-                            function_name,
-                            parameters,
-                            context=tool_context,
-                        )
-                    else:
-                        logging.warning(
-                            "Function '%s' not found in registry. Sending explanation.",
-                            function_name,
-                        )
-                        tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
-                        content = (
-                            f"I tried to use a function called '{function_name}', but it's not available.\n"
-                            f"Available tools: {tools}."
-                        )
-                        new_response = Message(
-                            source=self.name,
-                            to=message.source,
-                            content=content,
-                            message_type=MessageType.CHAT
-                        )
-                        await self.component_config.message_sender.send_message(new_response)
-                    return
-
-                await self.component_config.message_sender.send_message(response)
+                fallback_message = Message(
+                    source=self.name,
+                    to=message.source,
+                    content=content,
+                    message_type=MessageType.CHAT,
+                )
+                await self.component_config.message_sender.send_message(fallback_message)
                 return
-            # Should not reach here, but ensure last response is delivered
-            if last_response:
-                await self.component_config.message_sender.send_message(last_response)
+
+            if "function" in function_data:
+                function_name = function_data["function"]
+                parameters = function_data.get("parameters", {})
+
+                tool_context = ToolExecutionContext(
+                    agent=self.component_config.message_sender
+                )
+
+                if function_name == "send_message":
+                    parameters["recipient"] = message.source
+                    await self.functions_registry.execute(
+                        "send_message",
+                        parameters,
+                        context=tool_context,
+                    )
+                elif self.functions_registry.has_function(function_name):
+                    await self.functions_registry.execute(
+                        function_name,
+                        parameters,
+                        context=tool_context,
+                    )
+                else:
+                    logging.warning(
+                        "Function '%s' not found in registry. Sending explanation.",
+                        function_name,
+                    )
+                    tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
+                    content = (
+                        f"I tried to use a function called '{function_name}', but it's not available.\n"
+                        f"Available tools: {tools}."
+                    )
+                    new_response = Message(
+                        source=self.name,
+                        to=message.source,
+                        content=content,
+                        message_type=MessageType.CHAT
+                    )
+                    await self.component_config.message_sender.send_message(new_response)
+                return
+
+            await self.component_config.message_sender.send_message(response)
+            return
 
     async def generate_chat_response(self, extra_system_prompt: str = "") -> Message:
         """
