@@ -133,7 +133,18 @@ class BaseBrain(ABC):
         Returns:
             str: The conversation context as a formatted string
         """
-        return self.memory_manager.get_context()
+        if hasattr(self.memory_manager, "get_context"):
+            return self.memory_manager.get_context()
+        # Fallback for memories without get_context implementation
+        if hasattr(self.memory_manager, "chat_log_for"):
+            target = (
+                self.component_config.message_sender.attention
+                if self.component_config
+                else None
+            )
+            history = self.memory_manager.chat_log_for(target) if target else []
+            return "\n".join(f"{m.source}: {m.content}" for m in history)
+        return ""
     
     def create_chat_messages_prompt(self, system_prompt: str) -> List[Dict[str, str]]:
         """

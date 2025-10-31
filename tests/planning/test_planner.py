@@ -71,15 +71,15 @@ def planner(tmp_path: Path, functions_registry):
 
 
 @pytest.mark.asyncio
-async def test_plan_for_time_message(planner):
+async def test_plan_defaults_to_brain(planner):
     message = Message(
         source="human",
         to="agent",
-        content="What time is it?",
+        content="Hello there",
         message_type=MessageType.CHAT,
     )
     action = await planner.plan_for_message(message, conversation_id="conv1")
-    assert action["tool_name"] == "python_execute"
+    assert action["action_type"] == "use_brain"
 
 
 @pytest.mark.asyncio

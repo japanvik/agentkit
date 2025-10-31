@@ -1,5 +1,10 @@
 """Tool-based brain implementation."""
 from typing import Dict, Any, Optional
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    from backports.zoneinfo import ZoneInfo  # type: ignore
 
 import logging
 import json
@@ -99,24 +104,51 @@ class ToolBrain(SimpleBrain):
         if message.source != self.name:
             # Reply to a chat message from someone
             self.component_config.message_sender.attention = message.source
-            response = await self.generate_chat_response()
-            
-            # Instead of directly sending the message, process it as a function call
-            try:
-                # Extract the function call from the response content
-                function_data = extract_json(response.content)
-                
-                # Execute the function call
+            max_attempts = 3
+            extra_prompt = ""
+            last_response = None
+
+            for attempt in range(max_attempts):
+                response = await self.generate_chat_response(extra_prompt)
+                last_response = response
+
+                try:
+                    function_data = extract_json(response.content)
+                except Exception as exc:
+                    logging.warning(
+                        "Failed to parse function call attempt %s: %s",
+                        attempt + 1,
+                        exc,
+                    )
+                    if attempt == max_attempts - 1:
+                        if last_response:
+                            tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
+                            content = last_response.content.strip()
+                            if content:
+                                content += "\n\n"
+                            content += (
+                                "(For reference, available tools: "
+                                f"{tools}.)"
+                            )
+                            last_response.content = content
+                            await self.component_config.message_sender.send_message(last_response)
+                        return
+
+                    extra_prompt = (
+                        "Reminder: respond with exactly one JSON object describing a function call "
+                        "using the format Function: {\"function\": \"name\", \"parameters\": {...}}."
+                    )
+                    continue
+
                 if "function" in function_data:
                     function_name = function_data["function"]
                     parameters = function_data.get("parameters", {})
-                    
+
                     tool_context = ToolExecutionContext(
                         agent=self.component_config.message_sender
                     )
 
                     if function_name == "send_message":
-                        # Always set the recipient to the message source to ensure correct routing
                         parameters["recipient"] = message.source
                         await self.functions_registry.execute(
                             "send_message",
@@ -124,22 +156,21 @@ class ToolBrain(SimpleBrain):
                             context=tool_context,
                         )
                     elif self.functions_registry.has_function(function_name):
-                        # Execute other registered functions
                         await self.functions_registry.execute(
                             function_name,
                             parameters,
                             context=tool_context,
                         )
                     else:
-                        # Function doesn't exist, convert to a regular message
-                        logging.warning(f"Function '{function_name}' not found in registry. Converting to regular message.")
-                        # Create a new message with the original content (without the function call)
-                        content = f"I tried to use a function called '{function_name}' but it's not available. Here's my response instead:\n\n"
-                        if "content" in parameters:
-                            content += parameters["content"]
-                        else:
-                            content += "I'd like to help you with that, but I don't have the capability you're asking for."
-                        
+                        logging.warning(
+                            "Function '%s' not found in registry. Sending explanation.",
+                            function_name,
+                        )
+                        tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
+                        content = (
+                            f"I tried to use a function called '{function_name}', but it's not available.\n"
+                            f"Available tools: {tools}."
+                        )
                         new_response = Message(
                             source=self.name,
                             to=message.source,
@@ -147,15 +178,15 @@ class ToolBrain(SimpleBrain):
                             message_type=MessageType.CHAT
                         )
                         await self.component_config.message_sender.send_message(new_response)
-                else:
-                    # No function call found, send the original response
-                    await self.component_config.message_sender.send_message(response)
-            except Exception as e:
-                logging.error(f"Error processing function call: {e}")
-                # Fallback to direct send_message
-                await self.component_config.message_sender.send_message(response)
+                    return
 
-    async def generate_chat_response(self) -> Message:
+                await self.component_config.message_sender.send_message(response)
+                return
+            # Should not reach here, but ensure last response is delivered
+            if last_response:
+                await self.component_config.message_sender.send_message(last_response)
+
+    async def generate_chat_response(self, extra_system_prompt: str = "") -> Message:
         """
         Generate a chat response based on the current context.
         
@@ -167,8 +198,27 @@ class ToolBrain(SimpleBrain):
         target = self.component_config.message_sender.attention
         
         # Combine the original system prompt with function calling instructions
-        function_instructions = FUNCTION_SYSTEM_TEMPLATE.format(functions=self.functions_registry.prompt())
-        combined_system_prompt = f"{self.system_prompt.format(name=self.name, description=self.description, context=context, target=target)}\n\n{function_instructions}"
+        functions_prompt = self.functions_registry.prompt()
+        capability_summary = f"Current tools: {', '.join(sorted(self.functions_registry.function_map.keys()))}."
+        function_instructions = FUNCTION_SYSTEM_TEMPLATE.format(functions=functions_prompt)
+
+        sections = []
+        if self.system_prompt:
+            sections.append(
+                self.system_prompt.format(
+                    name=self.name,
+                    description=self.description,
+                    context=context,
+                    target=target,
+                )
+            )
+        sections.append(capability_summary)
+        sections.append(f"Current datetime (UTC): {datetime.utcnow().isoformat()}")
+        if extra_system_prompt:
+            sections.append(extra_system_prompt)
+        sections.append(function_instructions)
+
+        combined_system_prompt = "\n\n".join(sections)
         
         messages = self.create_chat_messages_prompt(combined_system_prompt)
         

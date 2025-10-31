@@ -53,7 +53,7 @@ class TaskAwareAgent(BaseAgent):
         """
         # Initialize functions registry if provided or create a new one
         from agentkit.functions.functions_registry import DefaultFunctionsRegistry
-        self.functions_registry = kwargs.get('functions_registry', DefaultFunctionsRegistry())
+        self.functions_registry = kwargs.pop('functions_registry', DefaultFunctionsRegistry())
         
         super().__init__(name, config, **kwargs)
         
@@ -117,12 +117,21 @@ class TaskAwareAgent(BaseAgent):
         if not self.is_intended_for_me(message):
             return
         
-        # Store message in memory
+        conversation_id = None
+        conversation = None
         if self.memory:
             self.memory.remember(message)
-        
-        # Create task from message
-        conversation_id = self.memory.get_conversation_id(message)
+            if hasattr(self.memory, "conversation_manager"):
+                conversation = self.memory.conversation_manager.get_or_create_conversation(message)
+                conversation_id = conversation.conversation_id
+        logger.debug(
+            "Enqueueing task for message type=%s from=%s conv=%s",
+            message.message_type,
+            message.source,
+            conversation_id,
+        )
+        if not conversation_id:
+            conversation_id = self.memory.get_conversation_id(message) if self.memory else f"conversation:{uuid.uuid4()}"
         task = Task.create(
             conversation_id=conversation_id,
             message=message,
@@ -137,6 +146,7 @@ class TaskAwareAgent(BaseAgent):
         
         # Add task to queue with effective priority
         await self.task_queue.put((-task.calculate_effective_priority(), task))
+        logger.debug("Task queue size is now %s", self.task_queue.qsize())
     
     async def _process_tasks(self) -> None:
         """Process tasks from the queue in order of priority."""
@@ -152,6 +162,13 @@ class TaskAwareAgent(BaseAgent):
                     # Task was cancelled, exit the loop
                     break
                 
+                logger.debug(
+                    "Processing task %s for conversation %s (queue size approx %s)",
+                    task.task_id,
+                    task.conversation_id,
+                    self.task_queue.qsize(),
+                )
+
                 try:
                     # Set current task
                     self._current_task = task
@@ -190,7 +207,7 @@ class TaskAwareAgent(BaseAgent):
             except asyncio.CancelledError:
                 # Task was cancelled, exit the loop
                 break
-    
+
     async def add_task(self, description: str, conversation_id: str = None,
                       priority: int = 0, due_time: Optional[datetime] = None) -> Task:
         """
@@ -244,6 +261,11 @@ class TaskAwareAgent(BaseAgent):
             logger.debug(f"Added task {task.task_id} to conversation {conversation_id}")
 
         await self.task_queue.put((-task.calculate_effective_priority(), task))
+        logger.debug(
+            "Added manual task %s; queue size=%s",
+            task.task_id,
+            self.task_queue.qsize(),
+        )
         return task
     
     def get_current_task(self) -> Optional[Task]:
@@ -254,6 +276,11 @@ class TaskAwareAgent(BaseAgent):
             The task currently being processed, or None if no task is being processed.
         """
         return self._current_task
+
+    def log_debug_state(self) -> None:
+        state = self.planner.describe_state()
+        logger.debug("Planner state snapshot: %s", state)
+        logger.debug("Task queue depth: %s", self.task_queue.qsize())
     
     async def get_pending_tasks(self) -> List[Task]:
         """
@@ -403,6 +430,7 @@ class TaskAwareAgent(BaseAgent):
             return True
 
         if action_type == "send_message" or tool_name == "send_message":
+            logger.debug("Executing send_message action with params=%s", parameters)
             await self.functions_registry.execute(
                 function="send_message",
                 parameters=parameters,
@@ -410,12 +438,21 @@ class TaskAwareAgent(BaseAgent):
             )
             return True
 
+        if action_type == "use_brain":
+            logger.debug("Delegating to brain for conversation %s", conversation_id)
+            if self.brain and source_message is not None:
+                await self.brain.handle_chat_message(source_message)
+                return True
+            return False
+
         if action_type == "use_tool" and tool_name:
+            logger.debug("Executing tool %s with params=%s", tool_name, parameters)
             result = await self.functions_registry.execute(
                 function=tool_name,
                 parameters=parameters,
                 context=ToolExecutionContext(agent=self),
             )
+            logger.debug("Tool %s returned result=%s", tool_name, result)
             if conversation_id and source_message:
                 follow_up = await self.planner.notify_tool_result(
                     conversation_id=conversation_id,
@@ -423,6 +460,7 @@ class TaskAwareAgent(BaseAgent):
                     original_message=source_message,
                 )
                 if follow_up.get("action_type") and follow_up.get("tool_name"):
+                    logger.debug("Executing follow-up action %s", follow_up)
                     return await self._execute_action(
                         follow_up,
                         conversation_id=conversation_id,

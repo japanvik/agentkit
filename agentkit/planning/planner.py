@@ -7,7 +7,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Deque, Dict, Optional
+from typing import Any, Deque, Dict, Optional
 
 from networkkit.messages import Message, MessageType
 
@@ -105,6 +105,38 @@ class AgentPlanner:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._store.reset)
 
+    def describe_state(self) -> Dict[str, Any]:
+        return {
+            "tasks": {
+                task_id: {
+                    "status": task.status,
+                    "waiting_on_delegation": task.waiting_on_delegation,
+                    "created_at": task.created_at.isoformat(),
+                    "updated_at": task.updated_at.isoformat(),
+                }
+                for task_id, task in self.tasks.items()
+            },
+            "delegations": {
+                deleg_id: {
+                    "status": deleg.status,
+                    "target": deleg.target_agent,
+                    "next_due": (deleg.next_due().isoformat() if deleg.next_due() else None),
+                    "attempts": deleg.reminder_attempts,
+                }
+                for deleg_id, deleg in self.delegations.items()
+            },
+            "reminders": {
+                reminder_id: {
+                    "status": reminder.status,
+                    "recipient": reminder.recipient,
+                    "next_run": reminder.next_run.isoformat(),
+                    "repeat": reminder.repeat_interval,
+                }
+                for reminder_id, reminder in self.reminders.items()
+            },
+            "known_agents": self.known_agents,
+        }
+
     def register_helo(
         self,
         *,
@@ -123,6 +155,14 @@ class AgentPlanner:
         Returns an action dictionary compatible with TaskAwareAgent._execute_action.
         """
         task_state = self._ensure_task(message, conversation_id)
+
+        logger.debug(
+            "Planner received message (conv=%s, from=%s, type=%s, content=%s)",
+            conversation_id,
+            message.source,
+            message.message_type,
+            message.content,
+        )
 
         if message.message_type == MessageType.HELO:
             self.register_helo(agent_name=message.source)
@@ -149,35 +189,46 @@ class AgentPlanner:
             }
 
         lower_content = (message.content or "").lower()
-        if "time" in lower_content:
-            code = (
-                "from datetime import datetime\n"
-                "print(datetime.now().isoformat())"
+        task_state.status = "running"
+        await self._save_state()
+
+        filesystem_keywords = [
+            "cwd",
+            "current directory",
+            "working directory",
+            "pwd",
+            "file system",
+            "filesystem",
+            "list files",
+            "ls ",
+            "directory listing",
+        ]
+        if any(keyword in lower_content for keyword in filesystem_keywords):
+            apology = (
+                "I don't have the ability to inspect your local filesystem or working directory."
             )
-            task_state.add_action("Retrieve current time via python_execute")
-            task_state.status = "running"
-            await self._save_state()
+            logger.debug(
+                "Planner detected filesystem request and will send apology (conv %s)",
+                conversation_id,
+            )
             return {
-                "action_type": "use_tool",
-                "tool_name": "python_execute",
+                "action_type": "send_message",
+                "tool_name": "send_message",
                 "parameters": {
-                    "code": code,
+                    "recipient": message.source,
+                    "content": apology,
+                    "message_type": "CHAT",
                 },
             }
 
-        default_response = (
-            "I'm processing your request. I'll get back to you soon."
+        logger.debug(
+            "Planner deferring to brain for conversation %s", conversation_id
         )
-        task_state.status = "running"
-        await self._save_state()
+
         return {
-            "action_type": "send_message",
-            "tool_name": "send_message",
-            "parameters": {
-                "recipient": message.source,
-                "content": default_response,
-                "message_type": "CHAT",
-            },
+            "action_type": "use_brain",
+            "tool_name": "",
+            "parameters": {},
         }
 
     def _ensure_task(self, message: Message, conversation_id: str) -> PlannerTaskState:
@@ -232,7 +283,7 @@ class AgentPlanner:
 
         stdout = result.get("stdout", "").strip()
         content = stdout or "I executed the command."
-        return {
+        result_action = {
             "action_type": "send_message",
             "tool_name": "send_message",
             "parameters": {
@@ -241,6 +292,12 @@ class AgentPlanner:
                 "message_type": "CHAT",
             },
         }
+        logger.debug(
+            "Planner generated follow-up send_message for conversation %s with content=%s",
+            conversation_id,
+            content,
+        )
+        return result_action
 
     async def schedule_delegation(
         self,

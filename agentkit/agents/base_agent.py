@@ -229,6 +229,11 @@ class BaseAgent(MessageSender):
             python_execution_tool,
             shell_command_tool,
         )
+        from agentkit.functions.filesystem_tools import (
+            list_directory_tool,
+            read_file_tool,
+            write_file_tool,
+        )
         from agentkit.functions.reminder_tools import schedule_reminder_tool
         from agentkit.functions.functions_registry import (
             FunctionDescriptor,
@@ -265,35 +270,6 @@ class BaseAgent(MessageSender):
             descriptor,
             pass_context=True,
         )
-
-        if not functions_registry.has_function("python_execute"):
-            descriptor = FunctionDescriptor(
-                name="python_execute",
-                description="Execute Python code in a sandboxed subprocess.",
-                parameters=[
-                    ParameterDescriptor(
-                        name="code",
-                        description="Python code snippet to execute.",
-                        required=True,
-                    ),
-                    ParameterDescriptor(
-                        name="timeout",
-                        description="Maximum execution time in seconds (default 15).",
-                        required=False,
-                    ),
-                    ParameterDescriptor(
-                        name="python_path",
-                        description="Optional path to the Python interpreter.",
-                        required=False,
-                    ),
-                ],
-                categories=["execution"],
-            )
-            functions_registry.register_function(
-                python_execution_tool,
-                descriptor,
-                pass_context=True,
-            )
 
         if not functions_registry.has_function("shell_command"):
             descriptor = FunctionDescriptor(
@@ -364,6 +340,98 @@ class BaseAgent(MessageSender):
             )
             functions_registry.register_function(
                 schedule_reminder_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("list_directory"):
+            descriptor = FunctionDescriptor(
+                name="list_directory",
+                description="List files within the configured filesystem root.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="path",
+                        description="Optional directory path relative to root",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="pattern",
+                        description="Optional glob pattern",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="recursive",
+                        description="Set true to search recursively",
+                        required=False,
+                    ),
+                ],
+                categories=["filesystem"],
+            )
+            functions_registry.register_function(
+                list_directory_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("read_file"):
+            descriptor = FunctionDescriptor(
+                name="read_file",
+                description="Read the contents of a file relative to the filesystem root.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="path",
+                        description="Path of the file to read",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="max_bytes",
+                        description="Optional maximum bytes to read",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="encoding",
+                        description="Text encoding (default utf-8)",
+                        required=False,
+                    ),
+                ],
+                categories=["filesystem"],
+            )
+            functions_registry.register_function(
+                read_file_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("write_file"):
+            descriptor = FunctionDescriptor(
+                name="write_file",
+                description="Write text content to a file within the filesystem root.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="path",
+                        description="Path of the file to write",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="content",
+                        description="Text content to write",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="mode",
+                        description="'overwrite' (default) or 'append'",
+                        required=False,
+                    ),
+                    ParameterDescriptor(
+                        name="encoding",
+                        description="Text encoding (default utf-8)",
+                        required=False,
+                    ),
+                ],
+                categories=["filesystem"],
+            )
+            functions_registry.register_function(
+                write_file_tool,
                 descriptor,
                 pass_context=True,
             )

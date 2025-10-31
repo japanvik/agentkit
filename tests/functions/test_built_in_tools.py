@@ -78,9 +78,11 @@ async def test_register_tools():
     
     # Check that the send_message tool was registered
     assert "send_message" in registry.function_map
-    assert "python_execute" in registry.function_map
     assert "shell_command" in registry.function_map
     assert "schedule_reminder" in registry.function_map
+    assert "list_directory" in registry.function_map
+    assert "read_file" in registry.function_map
+    assert "write_file" in registry.function_map
     
     # Check that the function descriptor has the expected properties
     descriptor = registry.function_registry["send_message"]

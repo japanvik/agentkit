@@ -211,8 +211,13 @@ class PlannerStateStore:
             },
         }
         temp_path = self.path.with_suffix(".tmp")
-        with temp_path.open("w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
+        try:
+            with temp_path.open("w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+        except FileNotFoundError:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with temp_path.open("w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
         temp_path.replace(self.path)
 
     def reset(self) -> None:
