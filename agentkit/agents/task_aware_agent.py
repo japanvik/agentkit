@@ -155,6 +155,11 @@ class TaskAwareAgent(BaseAgent):
             message=message,
             description=f"Process {message.message_type} message from {message.source}"
         )
+
+        conversation_path = self._build_conversation_path(conversation) if conversation else [message.source, self.name]
+        task.metadata["delegation_path"] = conversation_path
+        if conversation:
+            conversation.set_state("delegation_path", conversation_path)
         
         # Adjust priority based on message type
         if message.message_type == MessageType.HELO:
@@ -210,6 +215,7 @@ class TaskAwareAgent(BaseAgent):
                         action,
                         conversation_id=task.conversation_id,
                         source_message=message,
+                        conversation=conversation,
                     )
 
                     if completed:
@@ -361,17 +367,38 @@ class TaskAwareAgent(BaseAgent):
         recent_messages = conversation.get_recent_messages(5)  # Get last 5 messages
         context = "\n".join([f"{msg.source}: {msg.content}" for msg in recent_messages])
         
+        # Known agents the planner has seen via HELOs
+        known_agents = []
+        if hasattr(self, "planner") and getattr(self.planner, "known_agents", None):
+            for agent_name, info in self.planner.known_agents.items():
+                caps = info.get("capabilities") or {}
+                caps_summary = ", ".join(sorted(caps.keys())) if isinstance(caps, dict) and caps else json.dumps(caps)
+                last_seen = info.get("last_seen", "unknown time")
+                known_agents.append(f"- {agent_name}: capabilities={caps_summary or 'unknown'} (last seen {last_seen})")
+        if not known_agents:
+            known_agents.append("- None recorded")
+        known_agents_block = "\n".join(known_agents)
+
         # Create system prompt for the LLM
         system_prompt = f"""
         You are an AI assistant named {self.name}. You are processing a message and need to decide what action to take.
-        
+
         Available tools:
         {tools_prompt}
-        
+
+        Known agents on the network (from recent HELO messages):
+        {known_agents_block}
+
         Based on the message and conversation context, decide whether to:
         1. Send a message using the send_message tool
         2. Use another tool from the available tools
-        
+
+        Guiding principles:
+        - First check whether the requested information or action can be satisfied with what you already know (conversation history, known agents, prior tool outputs). If it can, respond immediately using send_message without calling another tool.
+        - If the user asks who is available/online, summarize the entries in the known agents section instead of stating you lack that capability.
+        - Only invoke a tool when you need new information or need to perform an external action.
+        - Prefer providing direct answers when the relevant data is already present in context.
+
         Your response should be a JSON object with the following structure:
         {{
             "action_type": "send_message" or "use_tool",
@@ -424,12 +451,27 @@ class TaskAwareAgent(BaseAgent):
                 }
             }
     
+    def _build_conversation_path(self, conversation: Optional[ConversationContext]) -> List[str]:
+        path: List[str] = []
+        if conversation:
+            stored = conversation.get_state("delegation_path")
+            if isinstance(stored, list) and stored:
+                path = list(stored)
+            else:
+                for msg in conversation.history:
+                    if msg.source not in path:
+                        path.append(msg.source)
+        if self.name not in path:
+            path.append(self.name)
+        return path
+
     async def _execute_action(
         self,
         action: Dict[str, Any],
         *,
         conversation_id: Optional[str] = None,
         source_message: Optional[Message] = None,
+        conversation: Optional[ConversationContext] = None,
     ) -> bool:
         """
         Execute an action determined by the LLM.
@@ -460,7 +502,16 @@ class TaskAwareAgent(BaseAgent):
             logger.debug("Delegating to brain for conversation %s", conversation_id)
             if self.brain and source_message is not None:
                 if hasattr(self.brain, "set_active_context"):
-                    self.brain.set_active_context(conversation_id, source_message)
+                    current_task_id = self._current_task.task_id if self._current_task else None
+                    delegation_path = self._current_task.metadata.get("delegation_path") if self._current_task else None
+                    if conversation and (not delegation_path or not isinstance(delegation_path, list)):
+                        delegation_path = self._build_conversation_path(conversation)
+                    self.brain.set_active_context(
+                        conversation_id,
+                        source_message,
+                        current_task_id,
+                        delegation_path if isinstance(delegation_path, list) else None,
+                    )
                 await self.brain.handle_chat_message(source_message)
                 if hasattr(self.brain, "clear_active_context"):
                     self.brain.clear_active_context()
@@ -482,6 +533,21 @@ class TaskAwareAgent(BaseAgent):
                         "last_message_content": source_message.content,
                     }
                 )
+            if conversation is not None:
+                path = self._build_conversation_path(conversation)
+                conversation.set_state("delegation_path", path)
+            elif self._current_task and isinstance(
+                self._current_task.metadata.get("delegation_path"), list
+            ):
+                path = list(self._current_task.metadata.get("delegation_path"))
+            elif source_message is not None:
+                path = [source_message.source, self.name]
+            else:
+                path = [self.name]
+            metadata["delegation_path"] = path
+            if self._current_task:
+                metadata["task_id"] = self._current_task.task_id
+                self._current_task.metadata["delegation_path"] = path
             result = await self.functions_registry.execute(
                 function=tool_name,
                 parameters=parameters,
@@ -504,6 +570,7 @@ class TaskAwareAgent(BaseAgent):
                         follow_up,
                         conversation_id=conversation_id,
                         source_message=source_message,
+                        conversation=conversation,
                     )
             return True
 

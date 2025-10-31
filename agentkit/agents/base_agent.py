@@ -10,6 +10,7 @@ capabilities to other components through ComponentConfig.
 """
 # Standard library imports
 import asyncio
+import json
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Optional, TypeVar
 
@@ -235,6 +236,10 @@ class BaseAgent(MessageSender):
             write_file_tool,
         )
         from agentkit.functions.reminder_tools import schedule_reminder_tool
+        from agentkit.functions.delegation_tools import (
+            delegate_task_tool,
+            escalate_task_tool,
+        )
         from agentkit.functions.functions_registry import (
             FunctionDescriptor,
             ParameterDescriptor,
@@ -340,6 +345,59 @@ class BaseAgent(MessageSender):
             )
             functions_registry.register_function(
                 schedule_reminder_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("delegate_task"):
+            descriptor = FunctionDescriptor(
+                name="delegate_task",
+                description="Delegate a task to another agent and schedule follow-up reminders.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="target_agent",
+                        description="Name of the agent to delegate to",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="content",
+                        description="Instructions for the delegated agent",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="reminder_interval",
+                        description="Seconds between reminder pings (optional)",
+                        required=False,
+                    ),
+                ],
+                categories=["coordination"],
+            )
+            functions_registry.register_function(
+                delegate_task_tool,
+                descriptor,
+                pass_context=True,
+            )
+
+        if not functions_registry.has_function("escalate_task"):
+            descriptor = FunctionDescriptor(
+                name="escalate_task",
+                description="Escalate a task to a stakeholder when automation cannot proceed.",
+                parameters=[
+                    ParameterDescriptor(
+                        name="reason",
+                        description="Explain why escalation is required",
+                        required=True,
+                    ),
+                    ParameterDescriptor(
+                        name="details",
+                        description="Optional additional context",
+                        required=False,
+                    ),
+                ],
+                categories=["coordination"],
+            )
+            functions_registry.register_function(
+                escalate_task_tool,
                 descriptor,
                 pass_context=True,
             )
@@ -499,14 +557,7 @@ class BaseAgent(MessageSender):
             if self.brain:
                 await self.brain.handle_chat_message(message)
         elif message.message_type == MessageType.HELO:
-            # Respond with ACK
-            response = Message(
-                source=self.name,
-                to=message.source,
-                content="",
-                message_type=MessageType.ACK
-            )
-            await self.send_message(response)
+            await self._acknowledge_helo(message)
     
     def register_message_handler(self, message_type: MessageType, handler: Callable) -> None:
         """
@@ -539,6 +590,45 @@ class BaseAgent(MessageSender):
             
         self._running = True
         logger.info("Agent %s started", self.name)
+        try:
+            await self._send_helo()
+        except Exception:
+            logger.exception("Agent %s failed to broadcast HELO", self.name)
+
+    async def _acknowledge_helo(self, message: Message) -> None:
+        """
+        Reply to an incoming HELO with our identity payload.
+        """
+        payload = json.dumps(self._build_identity_payload())
+        response = Message(
+            source=self.name,
+            to=message.source,
+            content=payload,
+            message_type=MessageType.ACK,
+        )
+        await self.send_message(response)
+
+    async def _send_helo(self) -> None:
+        if not self._message_sender:
+            return
+        payload = json.dumps(self._build_identity_payload())
+        message = Message(
+            source=self.name,
+            to="ALL",
+            content=payload,
+            message_type=MessageType.HELO,
+        )
+        await self.send_message(message)
+
+    def _build_identity_payload(self) -> Dict[str, Any]:
+        capabilities = self.config.get("capabilities")
+        description = self.config.get("description")
+        payload: Dict[str, Any] = {"name": self.name}
+        if description:
+            payload["description"] = description
+        if isinstance(capabilities, dict):
+            payload["capabilities"] = capabilities
+        return payload
 
     def _track_task(self, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
         """

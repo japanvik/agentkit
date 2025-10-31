@@ -80,6 +80,8 @@ class DelegationRecord:
     max_attempts: int = 6
     deadline: Optional[datetime] = None
     status: str = "waiting"  # waiting, completed, cancelled, timed_out
+    instructions: str = ""
+    path: List[str] = field(default_factory=list)
 
     def next_due(self) -> Optional[datetime]:
         if self.status != "waiting":
@@ -114,6 +116,8 @@ class DelegationRecord:
             copied["last_reminder"] = datetime.fromisoformat(copied["last_reminder"])
         if copied.get("deadline"):
             copied["deadline"] = datetime.fromisoformat(copied["deadline"])
+        copied.setdefault("instructions", "")
+        copied.setdefault("path", [])
         return cls(**copied)
 
 

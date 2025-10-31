@@ -3,7 +3,9 @@
 import asyncio
 import logging
 import re
+import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Optional, Dict, Any
 
 from agentkit.agents.base_agent import BaseAgent
@@ -17,6 +19,7 @@ rich_console = Console()
 # Initialize a ThreadPoolExecutor for handling blocking I/O
 executor = ThreadPoolExecutor(max_workers=2)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 class HumanAgent(BaseAgent):
     """
@@ -51,8 +54,16 @@ class HumanAgent(BaseAgent):
             message_sender=message_sender
         )
 
+        if not isinstance(self.config.get("capabilities"), dict):
+            self.config["capabilities"] = {}
+        self.config["capabilities"].setdefault("role", "human")
+
+        self.available_agents: Dict[str, Dict[str, Any]] = {}
+
         # Register a custom chat handler for human agents
         self.register_message_handler(MessageType.CHAT, self.handle_chat_message)
+        self.register_message_handler(MessageType.HELO, self.handle_helo_message)
+        self.register_message_handler(MessageType.ACK, self.handle_ack_message)
 
     async def start(self) -> None:
         """Start the agent's background tasks."""
@@ -160,17 +171,45 @@ class HumanAgent(BaseAgent):
                 logger.error("Error handling user input: %s", e, exc_info=True)
                 await asyncio.sleep(1)  # Prevent tight loop on error
 
+    async def handle_helo_message(self, message: Message) -> None:
+        """
+        Track peers who introduce themselves and acknowledge with our identity.
+        """
+        self._record_agent_identity(message.source, message.content)
+        await self._acknowledge_helo(message)
+
+    async def handle_ack_message(self, message: Message) -> None:
+        """
+        Track peers that acknowledge our HELO broadcast.
+        """
+        self._record_agent_identity(message.source, message.content)
+
     async def list_available_agents(self):
         """
         Displays the list of currently available agents.
         """
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(executor, rich_console.print, "\n[bold underline]Available Agents:[/bold underline]")
         await loop.run_in_executor(
             executor,
             rich_console.print,
-            f"[bold cyan]{self.name}[/bold cyan]: Human Agent"
+            "\n[bold underline]Available Agents:[/bold underline]",
         )
+        if not self.available_agents:
+            await loop.run_in_executor(
+                executor,
+                rich_console.print,
+                "[italic]No other agents have announced themselves yet.[/italic]",
+            )
+            return
+
+        for agent_name, info in sorted(self.available_agents.items()):
+            description = info.get("description") or "No description provided"
+            last_seen = info.get("last_seen", "unknown time")
+            await loop.run_in_executor(
+                executor,
+                rich_console.print,
+                f"[bold cyan]{agent_name}[/bold cyan] ({last_seen}): {description}",
+            )
 
     def is_intended_for_me(self, message: Message) -> bool:
         """
@@ -192,3 +231,24 @@ class HumanAgent(BaseAgent):
         """Stop the agent and cleanup resources."""
         await super().stop()
         executor.shutdown(wait=True)
+
+    def _record_agent_identity(self, agent_name: str, raw_content: Optional[str]) -> None:
+        """
+        Store identity details from HELO/ACK payloads.
+        """
+        description: Optional[str] = None
+        capabilities: Dict[str, Any] = {}
+        if raw_content:
+            try:
+                payload = json.loads(raw_content)
+                description = payload.get("description") or payload.get("about")
+                capabilities = payload.get("capabilities") or {}
+                agent_name = payload.get("name") or agent_name
+            except (json.JSONDecodeError, TypeError):
+                description = raw_content
+
+        self.available_agents[agent_name] = {
+            "description": description or "No description provided",
+            "capabilities": capabilities,
+            "last_seen": datetime.utcnow().isoformat(),
+        }

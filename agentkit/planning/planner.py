@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Deque, Dict, Optional
+from typing import Any, Deque, Dict, Optional, Sequence
 
 from networkkit.messages import Message, MessageType
 
@@ -142,13 +143,17 @@ class AgentPlanner:
         self,
         *,
         agent_name: str,
+        description: Optional[str] = None,
         capabilities: Optional[Dict] = None,
         last_seen: Optional[datetime] = None,
     ) -> None:
-        self.known_agents[agent_name] = {
-            "capabilities": capabilities or {},
+        existing = self.known_agents.get(agent_name, {})
+        entry = {
+            "description": description or existing.get("description"),
+            "capabilities": capabilities or existing.get("capabilities") or {},
             "last_seen": (last_seen or utc_now()).isoformat(),
         }
+        self.known_agents[agent_name] = entry
 
     async def plan_for_message(self, message: Message, conversation_id: str) -> Dict:
         """
@@ -166,7 +171,23 @@ class AgentPlanner:
         )
 
         if message.message_type == MessageType.HELO:
-            self.register_helo(agent_name=message.source)
+            description: Optional[str] = None
+            capabilities: Optional[Dict[str, Any]] = None
+            if message.content:
+                try:
+                    payload = json.loads(message.content)
+                    description = payload.get("description")
+                    capabilities = payload.get("capabilities")
+                except (json.JSONDecodeError, TypeError):
+                    description = message.content
+            identity_payload = {}
+            if hasattr(self.agent, "_build_identity_payload"):
+                identity_payload = self.agent._build_identity_payload()
+            self.register_helo(
+                agent_name=message.source,
+                description=description,
+                capabilities=capabilities if isinstance(capabilities, dict) else None,
+            )
             task_state.status = "completed"
             await self._save_state()
             return {
@@ -174,9 +195,32 @@ class AgentPlanner:
                 "tool_name": "send_message",
                 "parameters": {
                     "recipient": message.source,
-                    "content": "",
+                    "content": json.dumps(identity_payload),
                     "message_type": "ACK",
                 },
+            }
+
+        if message.message_type == MessageType.ACK:
+            description: Optional[str] = None
+            capabilities: Optional[Dict[str, Any]] = None
+            if message.content:
+                try:
+                    payload = json.loads(message.content)
+                    description = payload.get("description")
+                    capabilities = payload.get("capabilities")
+                except (json.JSONDecodeError, TypeError):
+                    description = message.content
+            self.register_helo(
+                agent_name=message.source,
+                description=description,
+                capabilities=capabilities if isinstance(capabilities, dict) else None,
+            )
+            task_state.status = "completed"
+            await self._save_state()
+            return {
+                "action_type": "noop",
+                "tool_name": "",
+                "parameters": {},
             }
 
     ### heuristics start
@@ -187,35 +231,6 @@ class AgentPlanner:
                 "action_type": "noop",
                 "tool_name": "",
                 "parameters": {},
-            }
-
-        lower_content = (message.content or "").lower()
-        filesystem_keywords = [
-            "cwd",
-            "current directory",
-            "working directory",
-            "pwd",
-            "file system",
-            "filesystem",
-            "list files",
-            "directory listing",
-        ]
-        if any(keyword in lower_content for keyword in filesystem_keywords):
-            apology = (
-                "I don't have the ability to inspect your local filesystem or working directory."
-            )
-            logger.debug(
-                "Planner detected filesystem request and will send apology (conv %s)",
-                conversation_id,
-            )
-            return {
-                "action_type": "send_message",
-                "tool_name": "send_message",
-                "parameters": {
-                    "recipient": message.source,
-                    "content": apology,
-                    "message_type": "CHAT",
-                },
             }
 
         task_state.status = "running"
@@ -304,6 +319,8 @@ class AgentPlanner:
         task_id: str,
         target_agent: str,
         reminder_interval: Optional[float] = None,
+        instructions: str = "",
+        path: Optional[Sequence[str]] = None,
     ) -> DelegationRecord:
         record = DelegationRecord(
             delegation_id=str(uuid.uuid4()),
@@ -316,12 +333,15 @@ class AgentPlanner:
             max_attempts=self.config.max_reminder_attempts,
             deadline=utc_now()
             + timedelta(hours=self.config.default_deadline_hours),
+            instructions=instructions,
+            path=list(path or []),
         )
         self.delegations[record.delegation_id] = record
         task_state = self.tasks.get(task_id)
         if task_state:
             task_state.waiting_on_delegation = record.delegation_id
             task_state.status = "waiting"
+            task_state.metadata["delegation_path"] = record.path
         await self._save_state()
         return record
 
@@ -341,6 +361,45 @@ class AgentPlanner:
             if status == "completed":
                 task_state.status = "completed"
         await self._save_state()
+
+    def choose_escalation_target(
+        self,
+        *,
+        path: Sequence[str],
+        current_agent: str,
+        fallback: Optional[str] = None,
+    ) -> str:
+        """Choose the best escalation target walking the delegation path upstream."""
+
+        candidates = [name for name in path if name]
+        if current_agent in candidates:
+            idx = candidates.index(current_agent)
+            upstream = list(reversed(candidates[:idx]))
+        else:
+            upstream = list(reversed(candidates))
+
+        for candidate in upstream:
+            if self._is_human_agent(candidate):
+                return candidate
+
+        if upstream:
+            return upstream[0]
+
+        return fallback or current_agent
+
+    def _is_human_agent(self, agent_name: str) -> bool:
+        info = self.known_agents.get(agent_name, {}) if hasattr(self, "known_agents") else {}
+        capabilities = info.get("capabilities") or {}
+        if isinstance(capabilities, dict):
+            role = str(
+                capabilities.get("role")
+                or capabilities.get("type")
+                or capabilities.get("agent_type")
+                or ""
+            ).lower()
+            if "human" in role:
+                return True
+        return "human" in agent_name.lower()
 
     async def _reminder_loop(self) -> None:
         try:
@@ -387,7 +446,7 @@ class AgentPlanner:
             record.task_id,
             record.reminder_attempts + 1,
         )
-        reminder_content = (
+        reminder_content = record.instructions or (
             f"Reminder: awaiting your response for task {record.task_id}."
         )
         try:
@@ -470,6 +529,12 @@ class AgentPlanner:
             target = metadata.get("target")
             message_text = metadata.get("message") or record.content
             prefix = metadata.get("prefix") or "Reminder: "
+            meta_context = {
+                "conversation_id": metadata.get("conversation_id"),
+                "requested_by": metadata.get("requested_by"),
+                "agent_name": self.agent.name,
+                "delegation_path": metadata.get("delegation_path"),
+            }
             try:
                 await self.functions_registry.execute(
                     "send_message",
@@ -478,7 +543,10 @@ class AgentPlanner:
                         "content": f"{prefix}{message_text}",
                         "message_type": "CHAT",
                     },
-                    context=ToolExecutionContext(agent=self.agent),
+                    context=ToolExecutionContext(
+                        agent=self.agent,
+                        metadata=meta_context,
+                    ),
                 )
             except Exception:
                 logger.exception("Failed to deliver reminder %s", record.reminder_id)

@@ -40,6 +40,7 @@ async def schedule_reminder_tool(
         "message": content,
         "conversation_id": conversation_id,
         "requested_by": requester,
+        "delegation_path": metadata.get("delegation_path"),
     }
 
     reminder = await planner.schedule_reminder(

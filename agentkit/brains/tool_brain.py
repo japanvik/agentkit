@@ -1,5 +1,5 @@
 """Tool-based brain implementation."""
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -63,6 +63,8 @@ class ToolBrain(SimpleBrain):
         self.functions_registry = functions_registry or DefaultFunctionsRegistry()
         self._active_conversation_id: Optional[str] = None
         self._active_source_message: Optional[Message] = None
+        self._active_task_id: Optional[str] = None
+        self._active_delegation_path: List[str] = []
         self.max_tool_iterations = 8
     
     def set_config(self, config) -> None:
@@ -109,6 +111,12 @@ class ToolBrain(SimpleBrain):
 
         original_sender = message.source
         self.component_config.message_sender.attention = original_sender
+        delegation_path = list(self._active_delegation_path)
+        if original_sender not in delegation_path:
+            delegation_path.append(original_sender)
+        if not delegation_path or delegation_path[-1] != self.name:
+            delegation_path.append(self.name)
+        self._active_delegation_path = delegation_path
         tool_context = ToolExecutionContext(
             agent=self.component_config.message_sender,
             session_id=self._active_conversation_id,
@@ -119,6 +127,8 @@ class ToolBrain(SimpleBrain):
                 "target": original_sender,
                 "last_message_content": message.content,
                 "agent_name": self.name,
+                "delegation_path": delegation_path,
+                "task_id": self._active_task_id,
             },
         )
 
@@ -596,6 +606,8 @@ class ToolBrain(SimpleBrain):
                         "conversation_id": self._active_conversation_id,
                         "requester": recipient,
                         "agent_name": self.name,
+                        "delegation_path": list(self._active_delegation_path),
+                        "task_id": self._active_task_id,
                     },
                 ),
             )
@@ -664,6 +676,23 @@ class ToolBrain(SimpleBrain):
                 )
             )
         sections.append(capability_summary)
+        agent = getattr(self.component_config, "message_sender", None) if self.component_config else None
+        if agent and hasattr(agent, "planner") and getattr(agent.planner, "known_agents", None):
+            known_entries = []
+            for agent_name, info in agent.planner.known_agents.items():
+                description = info.get("description") or "unknown"
+                last_seen = info.get("last_seen", "unknown time")
+                capabilities = info.get("capabilities") or {}
+                if isinstance(capabilities, dict) and capabilities:
+                    capability_list = ", ".join(sorted(str(k) for k in capabilities.keys()))
+                else:
+                    capability_list = "unspecified"
+                known_entries.append(
+                    f"- {agent_name}: {description} (last seen {last_seen}; capabilities: {capability_list})"
+                )
+            if not known_entries:
+                known_entries.append("- None recorded")
+            sections.append("Known agents observed via HELO/ACK:\n" + "\n".join(known_entries))
         sections.append(f"Current datetime (UTC): {datetime.utcnow().isoformat()}")
         if extra_system_prompt:
             sections.append(extra_system_prompt)
@@ -699,10 +728,16 @@ class ToolBrain(SimpleBrain):
         self,
         conversation_id: Optional[str],
         source_message: Optional[Message],
+        task_id: Optional[str] = None,
+        delegation_path: Optional[List[str]] = None,
     ) -> None:
         self._active_conversation_id = conversation_id
         self._active_source_message = source_message
+        self._active_task_id = task_id
+        self._active_delegation_path = list(delegation_path or [])
 
     def clear_active_context(self) -> None:
         self._active_conversation_id = None
         self._active_source_message = None
+        self._active_task_id = None
+        self._active_delegation_path = []
