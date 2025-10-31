@@ -58,9 +58,13 @@ async def list_directory_tool(
             if pattern and not recursive and not fnmatch.fnmatch(entry.name, pattern):
                 continue
             stat = entry.stat()
+            if root is None:
+                entry_path = str(entry)
+            else:
+                entry_path = str(entry.relative_to(root))
             entries.append(
                 {
-                    "path": str(entry.relative_to(root)),
+                    "path": entry_path,
                     "name": entry.name,
                     "is_dir": entry.is_dir(),
                     "size": stat.st_size,
