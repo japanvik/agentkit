@@ -189,9 +189,6 @@ class AgentPlanner:
             }
 
         lower_content = (message.content or "").lower()
-        task_state.status = "running"
-        await self._save_state()
-
         filesystem_keywords = [
             "cwd",
             "current directory",
@@ -200,7 +197,6 @@ class AgentPlanner:
             "file system",
             "filesystem",
             "list files",
-            "ls ",
             "directory listing",
         ]
         if any(keyword in lower_content for keyword in filesystem_keywords):
@@ -221,6 +217,35 @@ class AgentPlanner:
                 },
             }
 
+        capability_keywords = [
+            "tool",
+            "capability",
+            "ability",
+            "available function",
+            "what can you do",
+        ]
+        if any(keyword in lower_content for keyword in capability_keywords):
+            tool_names = ", ".join(sorted(self.functions_registry.function_map.keys()))
+            summary = (
+                "Here's a list of tools I can use right now: "
+                f"{tool_names}. Let me know which one you'd like me to use."
+            )
+            logger.debug(
+                "Planner responding with capability summary for conversation %s",
+                conversation_id,
+            )
+            return {
+                "action_type": "send_message",
+                "tool_name": "send_message",
+                "parameters": {
+                    "recipient": message.source,
+                    "content": summary,
+                    "message_type": "CHAT",
+                },
+            }
+
+        task_state.status = "running"
+        await self._save_state()
         logger.debug(
             "Planner deferring to brain for conversation %s", conversation_id
         )

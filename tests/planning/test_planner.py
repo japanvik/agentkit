@@ -83,6 +83,19 @@ async def test_plan_defaults_to_brain(planner):
 
 
 @pytest.mark.asyncio
+async def test_plan_lists_capabilities(planner):
+    message = Message(
+        source="human",
+        to="agent",
+        content="What tools do you have available?",
+        message_type=MessageType.CHAT,
+    )
+    action = await planner.plan_for_message(message, conversation_id="conv1")
+    assert action["tool_name"] == "send_message"
+    assert "tools" in action["parameters"]["content"].lower()
+
+
+@pytest.mark.asyncio
 async def test_notify_tool_result_returns_send_message(planner):
     message = Message(
         source="human",
