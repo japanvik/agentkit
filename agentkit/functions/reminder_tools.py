@@ -2,10 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from agentkit.functions.functions_registry import ToolExecutionContext
+
+
+def _parse_iso_timestamp(timestamp: str) -> datetime:
+    """
+    Parse an ISO-8601 timestamp string, accepting a trailing 'Z' for UTC.
+
+    Returns a timezone-naive UTC datetime so reminder scheduling logic can compare
+    it directly with utc_now() which also returns naive UTC values.
+    """
+    cleaned = timestamp.strip()
+    if cleaned.lower().endswith("z"):
+        cleaned = cleaned[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(cleaned)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 async def schedule_reminder_tool(
@@ -25,7 +41,7 @@ async def schedule_reminder_tool(
     parsed_run_at: Optional[datetime] = None
     if run_at:
         try:
-            parsed_run_at = datetime.fromisoformat(run_at)
+            parsed_run_at = _parse_iso_timestamp(run_at)
         except ValueError as exc:
             raise ValueError("run_at must be an ISO 8601 datetime string") from exc
 

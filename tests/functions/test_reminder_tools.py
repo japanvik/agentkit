@@ -68,4 +68,23 @@ async def test_schedule_reminder_tool(agent):
     record = agent.planner.reminders[reminder_id]
     record.next_run = record.next_run.replace(year=record.next_run.year - 1)
     await agent.planner._process_reminders()
-    assert agent.last_message["content"] == "Reminder message"
+    assert agent.last_message["recipient"] == "human"
+    assert agent.last_message["message_type"] == "CHAT"
+    assert agent.last_message["content"].endswith("Reminder message")
+
+
+@pytest.mark.asyncio
+async def test_schedule_reminder_tool_accepts_z_suffix(agent):
+    context = ToolExecutionContext(agent=agent)
+    result = await schedule_reminder_tool(
+        context,
+        content="UTC reminder",
+        run_at="2025-11-01T17:45:00Z",
+        recipient="human",
+        description="Test ISO 8601 with Z",
+    )
+    assert result["status"] == "scheduled"
+    reminder_id = result["reminder_id"]
+    record = agent.planner.reminders[reminder_id]
+    assert record.next_run.tzinfo is None
+    assert record.next_run.isoformat() == "2025-11-01T17:45:00"

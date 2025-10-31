@@ -356,6 +356,9 @@ class ToolBrain(SimpleBrain):
             logging.debug("Failed to record tool observation", exc_info=True)
 
     def _summarize_tool_result(self, function_name: str, result: Any) -> str:
+        if function_name == "schedule_reminder" and isinstance(result, dict):
+            return self._summarize_schedule_reminder(result)
+
         if isinstance(result, dict):
             parts = []
             exit_code = result.get("exit_code")
@@ -449,6 +452,63 @@ class ToolBrain(SimpleBrain):
         if len(value) <= limit:
             return value
         return value[:limit] + "\n... (truncated)"
+    @staticmethod
+    def _localize_timestamp(iso_string: str) -> Optional[tuple[str, str, str]]:
+        if not iso_string:
+            return None
+        try:
+            dt = datetime.fromisoformat(iso_string)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        utc_str = dt.isoformat().replace("+00:00", "Z")
+        local_dt = dt.astimezone()
+        tz_name = local_dt.tzname() or "local time"
+        local_str = local_dt.strftime("%Y-%m-%d %H:%M:%S ")
+        local_str = f"{local_str}{tz_name}"
+        return local_str, tz_name, utc_str
+
+    def _summarize_schedule_reminder(self, result: Dict[str, Any]) -> str:
+        parts: list[str] = []
+        status = result.get("status") or "scheduled"
+        recipient = result.get("recipient") or "self"
+        description = result.get("description")
+        next_run = result.get("next_run")
+        localization = self._localize_timestamp(next_run) if next_run else None
+        if localization:
+            local_str, tz_name, utc_str = localization
+            parts.append(
+                f"Reminder {status} for {recipient}. Next run: {local_str} ({tz_name}), which is {utc_str}."
+            )
+        else:
+            if next_run:
+                parts.append(
+                    f"Reminder {status} for {recipient}. Next run at {next_run} (timezone not detected)."
+                )
+            else:
+                parts.append(f"Reminder {status} for {recipient}.")
+        if description:
+            parts.append(f"Description: {description}")
+        metadata = result.get("metadata") or {}
+        if isinstance(metadata, dict):
+            action = metadata.get("action")
+            target = metadata.get("target")
+            if action or target:
+                detail = ", ".join(
+                    filter(
+                        None,
+                        [
+                            f"action={action}" if action else "",
+                            f"target={target}" if target else "",
+                        ],
+                    )
+                )
+                if detail:
+                    parts.append(f"Delivery: {detail}")
+        return "\n".join(parts).strip()
 
     def _tool_issue_hint(self, result: Any) -> str:
         if not isinstance(result, dict):
@@ -693,7 +753,9 @@ class ToolBrain(SimpleBrain):
             if not known_entries:
                 known_entries.append("- None recorded")
             sections.append("Known agents observed via HELO/ACK:\n" + "\n".join(known_entries))
-        sections.append(f"Current datetime (UTC): {datetime.utcnow().isoformat()}")
+        local_now = datetime.now().astimezone()
+        sections.append(f"Current datetime (local): {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        sections.append(f"Current datetime (UTC): {datetime.utcnow().isoformat()}Z")
         if extra_system_prompt:
             sections.append(extra_system_prompt)
         sections.append(function_instructions)
