@@ -85,7 +85,11 @@ async def test_handle_message(task_aware_agent):
         
         # Get the task from the call arguments
         call_args = task_aware_agent.task_queue.put.call_args
-        _, task = call_args[0][0]  # Extract the task from the priority tuple
+        queued = call_args[0][0]
+        if len(queued) == 3:
+            _, _, task = queued
+        else:
+            _, task = queued
         
         # Verify the task has the expected properties
         assert task.conversation_id is not None

@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from itertools import count
 
 from networkkit.messages import Message, MessageType
 
@@ -68,6 +69,7 @@ class TaskAwareAgent(BaseAgent):
             self.memory = ThreadedMemory()
             
         self.task_queue = asyncio.PriorityQueue()
+        self._queue_counter = count()
         self._current_task: Optional[Task] = None
         self._task_processor_task: Optional[asyncio.Task] = None
 
@@ -145,7 +147,7 @@ class TaskAwareAgent(BaseAgent):
             task.priority = 5   # Medium priority for chat messages
         
         # Add task to queue with effective priority
-        await self.task_queue.put((-task.calculate_effective_priority(), task))
+        await self.task_queue.put((-task.calculate_effective_priority(), next(self._queue_counter), task))
         logger.debug("Task queue size is now %s", self.task_queue.qsize())
     
     async def _process_tasks(self) -> None:
@@ -154,7 +156,7 @@ class TaskAwareAgent(BaseAgent):
             try:
                 # Get highest priority task with a timeout to allow for cancellation
                 try:
-                    _, task = await asyncio.wait_for(self.task_queue.get(), timeout=0.1)
+                    _, _, task = await asyncio.wait_for(self.task_queue.get(), timeout=0.1)
                 except asyncio.TimeoutError:
                     # No task available, continue the loop
                     continue
@@ -260,7 +262,7 @@ class TaskAwareAgent(BaseAgent):
             
             logger.debug(f"Added task {task.task_id} to conversation {conversation_id}")
 
-        await self.task_queue.put((-task.calculate_effective_priority(), task))
+        await self.task_queue.put((-task.calculate_effective_priority(), next(self._queue_counter), task))
         logger.debug(
             "Added manual task %s; queue size=%s",
             task.task_id,

@@ -13,7 +13,7 @@ from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.memory.memory_protocol import Memory
 from agentkit.processor import llm_chat, extract_json
 from agentkit.functions.functions_registry import DefaultFunctionsRegistry, ToolExecutionContext
-from networkkit.messages import Message
+from networkkit.messages import Message, MessageType
 from agentkit.constants import FUNCTION_SYSTEM_TEMPLATE
 
 class ToolBrain(SimpleBrain):
@@ -226,12 +226,20 @@ class ToolBrain(SimpleBrain):
         api_base = self.api_config.get('api_base')
         api_key = self.api_config.get('api_key')
         
-        reply = await llm_chat(
-            llm_model=self.model,
-            messages=messages,
-            api_base=api_base,
-            api_key=api_key
-        )
-
-        # Create a response message with the raw LLM output
-        return self.format_response(reply)
+        try:
+            reply = await llm_chat(
+                llm_model=self.model,
+                messages=messages,
+                api_base=api_base,
+                api_key=api_key
+            )
+            return self.format_response(reply)
+        except Exception as exc:
+            logging.error("LLM call failed: %s", exc)
+            fallback = Message(
+                source=self.name,
+                to=self.component_config.message_sender.attention,
+                content="I'm having trouble reaching my language model right now. Please try again later.",
+                message_type=MessageType.CHAT,
+            )
+            return fallback
