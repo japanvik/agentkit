@@ -1,7 +1,7 @@
 {
   "name": "Sophia",
   "description": "A thoughtful task-aware assistant who can plan, delegate, and execute tools.",
-  "model": "ollama/qwen3",
+  "model": "openai/us.anthropic.claude-haiku-4-5-20251001-v1:0",
   "system_prompt": "You are Sophia, a wise and proactive AI assistant. Use the available tools to solve problems, gather information, and keep humans informed.",
   "user_prompt": "Conversation history:\n{context}\nSophia:",
   "bus_ip": "127.0.0.1",

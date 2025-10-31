@@ -146,7 +146,11 @@ class DefaultFunctionsRegistry:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return await llm_chat(llm_model=DEFAULT_LLM_MODEL, messages=messages)
+        return await llm_chat(
+            llm_model=DEFAULT_LLM_MODEL,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
 
     async def execute(
         self,

@@ -63,7 +63,7 @@ class HumanAgent(BaseAgent):
             self.handle_user_input(),
             name=f"{self.name}-user-input"
         )
-        logger.info("Started user input task for %s", self.name)
+        logger.debug("Started user input task for %s", self.name)
 
     async def handle_chat_message(self, message: Message) -> None:
         """
@@ -72,7 +72,7 @@ class HumanAgent(BaseAgent):
         Args:
             message (Message): The incoming message object.
         """
-        logger.info("Human Agent '%s' received CHAT message: %s", self.name, message.content)
+        logger.debug("Human Agent '%s' received CHAT message: %s", self.name, message.content)
         try:
             sender = message.source
             content = message.content
@@ -104,7 +104,7 @@ class HumanAgent(BaseAgent):
         Supports @ALL for broadcasting and comma-separated @Agent1,@Agent2 for multiple targets.
         Also supports commands like /ls.
         """
-        logger.info("User input handler started for %s", self.name)
+        logger.debug("User input handler started for %s", self.name)
         while self._running:
             try:
                 loop = asyncio.get_running_loop()

@@ -55,7 +55,23 @@ class TaskAwareAgent(BaseAgent):
         # Initialize functions registry if provided or create a new one
         from agentkit.functions.functions_registry import DefaultFunctionsRegistry
         self.functions_registry = kwargs.pop('functions_registry', DefaultFunctionsRegistry())
-        
+
+        # Ensure we have a message sender wired up for tool/fallback responses
+        if "message_sender" not in kwargs or kwargs["message_sender"] is None:
+            publish_address = config.get("bus_publish_address")
+            if not publish_address and "bus_ip" in config:
+                publish_address = f"http://{config['bus_ip']}:8000"
+
+            if publish_address:
+                try:
+                    from networkkit.network import HTTPMessageSender
+                    kwargs["message_sender"] = HTTPMessageSender(publish_address=publish_address)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Failed to initialize HTTPMessageSender for agent %s", name
+                    )
+                    kwargs["message_sender"] = None
+       
         super().__init__(name, config, **kwargs)
         
         # Register built-in tools
@@ -443,16 +459,37 @@ class TaskAwareAgent(BaseAgent):
         if action_type == "use_brain":
             logger.debug("Delegating to brain for conversation %s", conversation_id)
             if self.brain and source_message is not None:
+                if hasattr(self.brain, "set_active_context"):
+                    self.brain.set_active_context(conversation_id, source_message)
                 await self.brain.handle_chat_message(source_message)
+                if hasattr(self.brain, "clear_active_context"):
+                    self.brain.clear_active_context()
                 return True
             return False
 
         if action_type == "use_tool" and tool_name:
             logger.debug("Executing tool %s with params=%s", tool_name, parameters)
+            metadata = {
+                "conversation_id": conversation_id,
+                "agent_name": self.name,
+            }
+            if source_message is not None:
+                metadata.update(
+                    {
+                        "requester": source_message.source,
+                        "source": source_message.source,
+                        "target": source_message.source,
+                        "last_message_content": source_message.content,
+                    }
+                )
             result = await self.functions_registry.execute(
                 function=tool_name,
                 parameters=parameters,
-                context=ToolExecutionContext(agent=self),
+                context=ToolExecutionContext(
+                    agent=self,
+                    session_id=conversation_id,
+                    metadata=metadata,
+                ),
             )
             logger.debug("Tool %s returned result=%s", tool_name, result)
             if conversation_id and source_message:

@@ -97,21 +97,21 @@ MEMORY_RETREIVAL_SYSTEM_TEMPLATE = """Analyze the following list of messages and
 Based on your analysis, describe the key themes or concepts that should be converted into vector representations for a similarity search in ChromaDB. Provide a clear description of what the search vectors should represent, such as specific topics, questions, or issues mentioned in the messages.
 """
 
-FUNCTION_SYSTEM_TEMPLATE = """As an AI agent, your task is to create a JSON formatted output in order to invoke a function call. Which function you will invoke will depend on the context of the current context which will be given.
-Make sure to choose the functions according to the next actions.
-You have a list of functions in JSON, with 'name', 'description', and 'parameters'.
-Make sure you follow the example and output in the correct JSON format. DO NOT have multiple function entries. MAKE SURE you have only one JSON object.
-If you see any errors regarding function calls in the messages, fix your calls based on the error messages provided to you by the system.
-Do not make calls to functions which do not exist. Use double quotes for your json formatting and remove whitespaces as much as possible.
+FUNCTION_SYSTEM_TEMPLATE = """You MUST respond with a single JSON object describing exactly one function call.
 
-Here is an example of a function call:
-Function: {{"function": "add_numbers", "parameters": {{"x": 10, "y": 20}}}}
+Required JSON structure:
+{{
+  "function": "<function_name>",
+  "parameters": {{ ... }}
+}}
 
-Here is an example of a function call with no parameters. DO NOT add any "parameters" section for functions with no parameters:
-Function: {{"function": "print_hello"}}
-
-For the send_message function, always set the recipient parameter to the name of the person who sent you the message. For example:
-Function: {{"function": "send_message", "parameters": {{"recipient": "Vik", "content": "Hello! How can I help you today?", "message_type": "CHAT"}}}}
+Rules you must follow:
+- Do not include any text before or after the JSON object.
+- Always use double quotes for strings and property names.
+- If a function takes no parameters, return an empty object: "parameters": {{}}.
+- Only call functions listed below.
+- If you see an error message about a previous tool call, fix the issue and emit a new JSON object.
+- For send_message, always set "recipient" to the name of the entity you are replying to.
 
 Available functions:
 {functions}

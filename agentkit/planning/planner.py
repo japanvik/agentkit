@@ -131,6 +131,7 @@ class AgentPlanner:
                     "recipient": reminder.recipient,
                     "next_run": reminder.next_run.isoformat(),
                     "repeat": reminder.repeat_interval,
+                    "metadata": reminder.metadata,
                 }
                 for reminder_id, reminder in self.reminders.items()
             },
@@ -423,6 +424,7 @@ class AgentPlanner:
         delay_seconds: Optional[float] = None,
         repeat_seconds: Optional[float] = None,
         description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> ReminderRecord:
         if not content:
             raise ValueError("content is required")
@@ -442,6 +444,7 @@ class AgentPlanner:
             recipient=recipient or self.agent.name,
             next_run=run_at,
             repeat_interval=repeat_seconds,
+            metadata=metadata or {},
         )
         self.reminders[reminder.reminder_id] = reminder
         await self._save_state()
@@ -459,18 +462,39 @@ class AgentPlanner:
         logger.info(
             "Delivering reminder %s to %s", record.reminder_id, record.recipient
         )
-        try:
-            await self.functions_registry.execute(
-                "send_message",
-                parameters={
-                    "recipient": record.recipient,
-                    "content": record.content,
-                    "message_type": "CHAT",
-                },
-                context=ToolExecutionContext(agent=self.agent),
+        metadata = record.metadata or {}
+        action = metadata.get("action") or (
+            "send_message" if metadata.get("target") else "plan"
+        )
+        if action == "send_message" and metadata.get("target"):
+            target = metadata.get("target")
+            message_text = metadata.get("message") or record.content
+            prefix = metadata.get("prefix") or "Reminder: "
+            try:
+                await self.functions_registry.execute(
+                    "send_message",
+                    parameters={
+                        "recipient": target,
+                        "content": f"{prefix}{message_text}",
+                        "message_type": "CHAT",
+                    },
+                    context=ToolExecutionContext(agent=self.agent),
+                )
+            except Exception:
+                logger.exception("Failed to deliver reminder %s", record.reminder_id)
+        else:
+            instructions = metadata.get("message") or record.content
+            synthetic_source = metadata.get("requested_by") or self.agent.name
+            synthetic_message = Message(
+                source=synthetic_source,
+                to=self.agent.name,
+                content=instructions,
+                message_type=MessageType.CHAT,
             )
-        except Exception:
-            logger.exception("Failed to deliver reminder %s", record.reminder_id)
+            try:
+                await self.agent.handle_message(synthetic_message)
+            except Exception:
+                logger.exception("Failed to enqueue reminder task for %s", record.reminder_id)
 
         if not record.reschedule():
             self.reminders.pop(record.reminder_id, None)

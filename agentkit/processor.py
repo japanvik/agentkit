@@ -1,11 +1,12 @@
 import json
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import logging
-from dotenv import load_dotenv
+import litellm
 from litellm import acompletion
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,6 +20,22 @@ for logger_name in (
 ):
     logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+# Disable LiteLLM cost calculation (some providers lack pricing info metadata)
+def _disable_cost_calculation(*_args, **_kwargs):
+    return None
+
+try:
+    import litellm.cost_calculator as _litellm_cost_calculator  # type: ignore
+except Exception:
+    _litellm_cost_calculator = None  # type: ignore
+
+try:
+    litellm.response_cost_calculator = _disable_cost_calculation  # type: ignore[attr-defined]
+    if _litellm_cost_calculator is not None:
+        _litellm_cost_calculator.response_cost_calculator = _disable_cost_calculation  # type: ignore[attr-defined]
+except Exception:
+    pass
+
 class JSONParseError(ValueError):
     """
     Custom exception class raised when encountering errors during JSON parsing in the `extract_json` function.
@@ -30,7 +47,8 @@ async def llm_chat(
     llm_model: str,
     messages: List[Dict],
     api_base: Optional[str] = None,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    response_format: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a chat response using the specified LLM model.
@@ -62,7 +80,7 @@ async def llm_chat(
     final_api_key = api_key or os.getenv('OPENAI_API_KEY')
 
     # Prepare completion parameters
-    completion_params = {
+    completion_params: Dict[str, Any] = {
         "model": llm_model,
         "messages": messages,
         "api_base": final_api_base
@@ -71,6 +89,9 @@ async def llm_chat(
     # Add API key if available
     if final_api_key:
         completion_params["api_key"] = final_api_key
+
+    if response_format:
+        completion_params["response_format"] = response_format
 
     # Generate response using LLM
     response = await acompletion(**completion_params)

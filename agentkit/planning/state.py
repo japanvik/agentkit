@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 def utc_now() -> datetime:
@@ -42,6 +42,7 @@ class ReminderRecord:
     repeat_interval: Optional[float] = None
     created_at: datetime = field(default_factory=utc_now)
     status: str = "scheduled"  # scheduled, completed, cancelled
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def reschedule(self) -> bool:
         if self.repeat_interval is None:
@@ -61,6 +62,7 @@ class ReminderRecord:
         copied = dict(data)
         copied["next_run"] = datetime.fromisoformat(copied["next_run"])
         copied["created_at"] = datetime.fromisoformat(copied["created_at"])
+        copied.setdefault("metadata", {})
         return cls(**copied)
 
 

@@ -29,13 +29,27 @@ async def schedule_reminder_tool(
         except ValueError as exc:
             raise ValueError("run_at must be an ISO 8601 datetime string") from exc
 
+    metadata = dict(context.metadata or {})
+    conversation_id = metadata.get("conversation_id") or context.session_id
+    requester = metadata.get("requester") or metadata.get("source") or context.agent.name
+    target = recipient or metadata.get("target") or requester
+
+    reminder_metadata = {
+        "action": "send_message" if target else metadata.get("action", "plan"),
+        "target": target,
+        "message": content,
+        "conversation_id": conversation_id,
+        "requested_by": requester,
+    }
+
     reminder = await planner.schedule_reminder(
         content=content,
-        recipient=recipient,
+        recipient=recipient or context.agent.name,
         run_at=parsed_run_at,
         delay_seconds=delay_seconds,
         repeat_seconds=repeat_seconds,
         description=description,
+        metadata=reminder_metadata,
     )
 
     return {
@@ -43,4 +57,5 @@ async def schedule_reminder_tool(
         "reminder_id": reminder.reminder_id,
         "next_run": reminder.next_run.isoformat(),
         "recipient": reminder.recipient,
+        "metadata": reminder.metadata,
     }
