@@ -12,11 +12,12 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.8"
+python = ">=3.10"
 networkkit = ">=0.0.2"
 litellm = "*"
 python-dotenv = "*"
 rich = "*"
+mcp = "^1.14"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"

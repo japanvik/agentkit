@@ -17,6 +17,15 @@ class DummyAgent:
         self._tasks = []
         self.last_message = None
 
+    async def handle_message(self, message: Message):
+        self.last_message = {
+            "recipient": message.to,
+            "content": message.content,
+            "message_type": message.message_type.name
+            if hasattr(message.message_type, "name")
+            else str(message.message_type),
+        }
+
     def create_background_task(self, coro, name=None):
         task = asyncio.create_task(coro, name=name)
         self._tasks.append(task)
