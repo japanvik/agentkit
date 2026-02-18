@@ -64,6 +64,7 @@ class ToolBrain(SimpleBrain):
         self._active_source_message: Optional[Message] = None
         self._active_task_id: Optional[str] = None
         self._active_delegation_path: List[str] = []
+        self._pending_delegate_requesters: Dict[str, Dict[str, str]] = {}
         self.max_tool_iterations = 8
     
     def set_config(self, config) -> None:
@@ -109,7 +110,41 @@ class ToolBrain(SimpleBrain):
             return
 
         original_sender = message.source
-        self.component_config.message_sender.attention = original_sender
+        pending_delegate = self._pending_delegate_requesters.get(original_sender)
+        requester = (
+            pending_delegate.get("requester", original_sender)
+            if isinstance(pending_delegate, dict)
+            else original_sender
+        )
+        delegated_reply = isinstance(pending_delegate, dict)
+        request_intent = "general"
+        if not delegated_reply:
+            request_intent = await self._classify_request_intent(message.content)
+        self.component_config.message_sender.attention = requester
+
+        # If this message is a reply from a delegated agent, immediately relay it
+        # to the original requester and close the delegation loop for that agent.
+        if delegated_reply and pending_delegate.get("intent") != "long_running_followup":
+            await self._send_message_to_recipient(
+                message.content,
+                requester,
+                tool_context=ToolExecutionContext(
+                    agent=self.component_config.message_sender,
+                    session_id=self._active_conversation_id,
+                    metadata={
+                        "conversation_id": self._active_conversation_id,
+                        "requester": requester,
+                        "source": original_sender,
+                        "target": requester,
+                        "last_message_content": message.content,
+                        "agent_name": self.name,
+                        "delegation_path": list(self._active_delegation_path),
+                        "task_id": self._active_task_id,
+                    },
+                ),
+            )
+            self._pending_delegate_requesters.pop(original_sender, None)
+            return
         delegation_path = list(self._active_delegation_path)
         if original_sender not in delegation_path:
             delegation_path.append(original_sender)
@@ -121,13 +156,14 @@ class ToolBrain(SimpleBrain):
             session_id=self._active_conversation_id,
             metadata={
                 "conversation_id": self._active_conversation_id,
-                "requester": original_sender,
+                "requester": requester,
                 "source": original_sender,
-                "target": original_sender,
+                "target": requester,
                 "last_message_content": message.content,
                 "agent_name": self.name,
                 "delegation_path": delegation_path,
                 "task_id": self._active_task_id,
+                "request_intent": request_intent,
             },
         )
 
@@ -191,16 +227,31 @@ class ToolBrain(SimpleBrain):
 
             parameters = function_data.get("parameters", {}) or {}
 
+            if (
+                function_name == "schedule_reminder"
+                and request_intent != "long_running_followup"
+                and self._has_pending_delegation_for_requester(requester)
+            ):
+                if iteration < max_iterations - 1:
+                    followup_prompt = (
+                        "Do not schedule reminders for this request. The user asked you to wait for a delegate's "
+                        "reply and report it back immediately. Wait for the delegate reply and then send the final answer."
+                    )
+                    continue
+                break
+
             if function_name == "schedule_reminder" and "recipient" not in parameters:
-                parameters["recipient"] = original_sender
+                parameters["recipient"] = requester
 
             if function_name == "send_message":
-                parameters["recipient"] = original_sender
+                parameters["recipient"] = requester
                 await self.functions_registry.execute(
                     "send_message",
                     parameters,
                     context=tool_context,
                 )
+                if delegated_reply:
+                    self._pending_delegate_requesters.pop(original_sender, None)
                 return
 
             if not self.functions_registry.has_function(function_name):
@@ -215,6 +266,17 @@ class ToolBrain(SimpleBrain):
                     )
                     continue
                 break
+
+            if self._is_send_message_function(function_name):
+                target = str(parameters.get("recipient", "")).strip()
+                if delegated_reply and target == original_sender:
+                    parameters["recipient"] = requester
+                    target = requester
+                self._track_pending_delegation(
+                    requester=requester,
+                    target=target,
+                    intent=request_intent,
+                )
 
             last_tool_name = function_name
             last_tool_parameters = parameters
@@ -335,9 +397,11 @@ class ToolBrain(SimpleBrain):
             if synthesized:
                 await self._send_message_to_recipient(
                     synthesized,
-                    original_sender,
+                    requester,
                     tool_context=tool_context,
                 )
+                if delegated_reply:
+                    self._pending_delegate_requesters.pop(original_sender, None)
                 return
             if summary:
                 fallback_content = (
@@ -353,9 +417,11 @@ class ToolBrain(SimpleBrain):
                 if synthesized:
                     await self._send_message_to_recipient(
                         synthesized,
-                        original_sender,
+                        requester,
                         tool_context=tool_context,
                     )
+                    if delegated_reply:
+                        self._pending_delegate_requesters.pop(original_sender, None)
                     return
                 fallback_content = (
                     "I wasn't able to make progress on that request. "
@@ -363,9 +429,11 @@ class ToolBrain(SimpleBrain):
                 )
         await self._send_message_to_recipient(
             fallback_content,
-            original_sender,
+            requester,
             tool_context=tool_context,
         )
+        if delegated_reply:
+            self._pending_delegate_requesters.pop(original_sender, None)
 
     async def _send_fallback_response(
         self,
@@ -560,6 +628,73 @@ class ToolBrain(SimpleBrain):
             "If the task is complete, call the send_message tool with your final answer. "
             "If another tool call is needed, issue it now."
         )
+
+    @staticmethod
+    def _is_send_message_function(function_name: str) -> bool:
+        return function_name == "send_message" or function_name.endswith("::send_message")
+
+    def _track_pending_delegation(self, *, requester: str, target: str, intent: str) -> None:
+        target_name = (target or "").strip()
+        requester_name = (requester or "").strip()
+        if not target_name or not requester_name:
+            return
+        if target_name in {requester_name, self.name}:
+            return
+        self._pending_delegate_requesters[target_name] = {
+            "requester": requester_name,
+            "intent": intent or "general",
+        }
+        agent = self.component_config.message_sender if self.component_config else None
+        if agent and hasattr(agent, "register_delegate_wait"):
+            try:
+                agent.register_delegate_wait(
+                    delegate=target_name,
+                    requester=requester_name,
+                    intent=intent or "general",
+                )
+            except Exception:
+                logging.debug("Failed to register delegate wait on agent", exc_info=True)
+
+    def _has_pending_delegation_for_requester(self, requester: str) -> bool:
+        requester_name = (requester or "").strip()
+        if not requester_name:
+            return False
+        for record in self._pending_delegate_requesters.values():
+            if isinstance(record, dict) and record.get("requester") == requester_name:
+                return True
+        return False
+
+    async def _classify_request_intent(self, user_request: str) -> str:
+        text = (user_request or "").strip()
+        if not text:
+            return "general"
+
+        system_prompt = (
+            "Classify the user request intent for delegation orchestration. "
+            "Return JSON with only an 'intent' field. "
+            "Allowed intents: delegate_and_wait_for_reply, long_running_followup, general. "
+            "Use delegate_and_wait_for_reply when the user asks to send something to another agent/tool "
+            "and then report that reply back."
+        )
+        try:
+            response = await llm_chat(
+                llm_model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                api_base=self.api_config.get("api_base"),
+                api_key=self.api_config.get("api_key"),
+                response_format={"type": "json_object"},
+            )
+            payload = extract_json(response)
+        except Exception:
+            return "general"
+
+        intent = str(payload.get("intent", "general")).strip().lower()
+        if intent not in {"delegate_and_wait_for_reply", "long_running_followup", "general"}:
+            return "general"
+        return intent
 
     @staticmethod
     def _truncate(value: str, *, limit: int) -> str:

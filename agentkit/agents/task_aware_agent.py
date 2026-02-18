@@ -88,11 +88,16 @@ class TaskAwareAgent(BaseAgent):
         self._queue_counter = count()
         self._current_task: Optional[Task] = None
         self._task_processor_task: Optional[asyncio.Task] = None
+        self._delegate_waiters: Dict[str, Dict[str, str]] = {}
 
         persistence_root = Path(
             self.config.get("planner_state_dir", "agent_state")
         )
-        planner_config = PlannerConfig(persistence_dir=persistence_root)
+        planner_config = PlannerConfig(
+            persistence_dir=persistence_root,
+            task_generation_model=self.config.get("planner_model"),
+            task_generation_api_config=self.config.get("planner_api_config", {}) or {},
+        )
         self.planner = AgentPlanner(
             self,
             config=planner_config,
@@ -134,6 +139,9 @@ class TaskAwareAgent(BaseAgent):
         # Only handle messages intended for this agent
         if not self.is_intended_for_me(message):
             return
+
+        if await self._handle_delegate_reply_shortcut(message):
+            return
         
         conversation_id = None
         conversation = None
@@ -170,6 +178,49 @@ class TaskAwareAgent(BaseAgent):
         # Add task to queue with effective priority
         await self.task_queue.put((-task.calculate_effective_priority(), next(self._queue_counter), task))
         logger.debug("Task queue size is now %s", self.task_queue.qsize())
+
+    def register_delegate_wait(
+        self,
+        *,
+        delegate: str,
+        requester: str,
+        intent: str = "general",
+    ) -> None:
+        delegate_name = (delegate or "").strip()
+        requester_name = (requester or "").strip()
+        if not delegate_name or not requester_name:
+            return
+        self._delegate_waiters[delegate_name] = {
+            "requester": requester_name,
+            "intent": intent or "general",
+        }
+
+    async def _handle_delegate_reply_shortcut(self, message: Message) -> bool:
+        if message.message_type != MessageType.CHAT:
+            return False
+
+        record = self._delegate_waiters.get(message.source)
+        if not isinstance(record, dict):
+            return False
+
+        if record.get("intent") == "long_running_followup":
+            return False
+
+        requester = str(record.get("requester", "")).strip()
+        if not requester:
+            return False
+
+        self._delegate_waiters.pop(message.source, None)
+        await self.functions_registry.execute(
+            function="send_message",
+            parameters={
+                "recipient": requester,
+                "content": message.content,
+                "message_type": "CHAT",
+            },
+            context=ToolExecutionContext(agent=self),
+        )
+        return True
     
     async def _process_tasks(self) -> None:
         """Process tasks from the queue in order of priority."""

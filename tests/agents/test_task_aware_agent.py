@@ -6,14 +6,31 @@ These tests verify that the TaskAwareAgent correctly manages tasks and conversat
 
 import pytest
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime, timedelta
 
 from networkkit.messages import Message, MessageType
 
 from agentkit.agents.task_aware_agent import TaskAwareAgent
+from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.memory.threaded_memory import ThreadedMemory
 from agentkit.memory.conversation.task import Task
+from agentkit.functions.functions_registry import ToolExecutionContext
+
+
+class InMemoryMessageBus:
+    def __init__(self):
+        self.agents = {}
+        self.messages = []
+
+    def register(self, agent):
+        self.agents[agent.name] = agent
+
+    async def send_message(self, message):
+        self.messages.append(message)
+        recipient = self.agents.get(message.to)
+        if recipient:
+            await recipient.handle_message(message)
 
 
 @pytest.fixture
@@ -35,6 +52,15 @@ async def test_agent_initialization(task_aware_agent):
     assert isinstance(task_aware_agent.task_queue, asyncio.PriorityQueue)
     assert task_aware_agent._current_task is None
     assert task_aware_agent._task_processor_task is None
+
+
+@pytest.mark.asyncio
+async def test_agent_initialization_uses_planner_model_config():
+    agent = TaskAwareAgent(
+        name="PlannerConfigAgent",
+        config={"name": "PlannerConfigAgent", "planner_model": "ollama/qwen3-planner"},
+    )
+    assert agent.planner._task_generation_model == "ollama/qwen3-planner"
 
 
 @pytest.mark.asyncio
@@ -164,3 +190,83 @@ async def test_get_active_conversations(task_aware_agent):
     finally:
         # Stop the agent
         await task_aware_agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_delegate_reply_shortcut_forwards_to_requester(task_aware_agent):
+    task_aware_agent.register_delegate_wait(
+        delegate="echo-agent",
+        requester="Human",
+        intent="delegate_and_wait_for_reply",
+    )
+    task_aware_agent.functions_registry.execute = AsyncMock(return_value={"status": "sent"})
+
+    message = Message(
+        source="echo-agent",
+        to="TestAgent",
+        content="ping-test",
+        message_type=MessageType.CHAT,
+    )
+    handled = await task_aware_agent._handle_delegate_reply_shortcut(message)
+    assert handled is True
+    task_aware_agent.functions_registry.execute.assert_awaited_once()
+    _, kwargs = task_aware_agent.functions_registry.execute.call_args
+    assert kwargs["function"] == "send_message"
+    assert kwargs["parameters"]["recipient"] == "Human"
+    assert kwargs["parameters"]["content"] == "ping-test"
+
+
+@pytest.mark.asyncio
+async def test_delegate_reply_shortcut_two_agent_flow():
+    bus = InMemoryMessageBus()
+
+    sophia = TaskAwareAgent(
+        name="Sophia",
+        config={"name": "Sophia", "planner_state_dir": "agent_state/test_sophia"},
+        message_sender=bus,
+    )
+    worker = SimpleAgent(
+        name="Worker",
+        config={"name": "Worker"},
+        message_sender=bus,
+    )
+
+    async def worker_chat_handler(message: Message):
+        await worker.send_message(
+            Message(
+                source="Worker",
+                to=message.source,
+                content=message.content,
+                message_type=MessageType.CHAT,
+            )
+        )
+
+    worker.register_message_handler(MessageType.CHAT, worker_chat_handler)
+
+    bus.register(sophia)
+    bus.register(worker)
+
+    sophia.register_delegate_wait(
+        delegate="Worker",
+        requester="Human",
+        intent="delegate_and_wait_for_reply",
+    )
+
+    await sophia.functions_registry.execute(
+        function="send_message",
+        parameters={
+            "recipient": "Worker",
+            "content": "ping-two-agent",
+            "message_type": "CHAT",
+        },
+        context=ToolExecutionContext(agent=sophia),
+    )
+
+    routed = [
+        (msg.source, msg.to, msg.content, msg.message_type)
+        for msg in bus.messages
+        if msg.message_type == MessageType.CHAT
+    ]
+    assert ("Sophia", "Worker", "ping-two-agent", MessageType.CHAT) in routed
+    assert ("Worker", "Sophia", "ping-two-agent", MessageType.CHAT) in routed
+    assert ("Sophia", "Human", "ping-two-agent", MessageType.CHAT) in routed

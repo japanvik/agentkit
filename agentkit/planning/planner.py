@@ -5,10 +5,10 @@ import logging
 import json
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Deque, Dict, Optional, Sequence
+from typing import Any, Deque, Dict, List, Optional, Sequence
 
 from networkkit.messages import Message, MessageType
 
@@ -16,6 +16,7 @@ from agentkit.functions.functions_registry import (
     DefaultFunctionsRegistry,
     ToolExecutionContext,
 )
+from agentkit.processor import extract_json, llm_chat
 from agentkit.planning.state import (
     DelegationRecord,
     PlannerStateStore,
@@ -36,6 +37,9 @@ class PlannerConfig:
     max_reminder_attempts: int = 8
     reminder_loop_interval: float = 30.0
     default_deadline_hours: float = 6.0
+    task_generation_model: Optional[str] = None
+    task_generation_api_config: Dict[str, Any] = field(default_factory=dict)
+    max_generated_actions: int = 6
 
 
 class AgentPlanner:
@@ -64,6 +68,15 @@ class AgentPlanner:
         self.delegations: Dict[str, DelegationRecord] = loaded["delegations"]
         self.reminders: Dict[str, ReminderRecord] = loaded["reminders"]
         self.known_agents: Dict[str, Dict] = loaded["known_agents"]
+        default_model: Optional[str] = None
+        default_api_config: Dict[str, Any] = {}
+        if hasattr(self.agent, "config") and isinstance(self.agent.config, dict):
+            default_model = self.agent.config.get("model")
+            default_api_config = self.agent.config.get("api_config", {}) or {}
+        self._task_generation_model = config.task_generation_model or default_model
+        self._task_generation_api_config = (
+            config.task_generation_api_config or default_api_config
+        )
 
         self._reminder_task: Optional[asyncio.Task] = None
         self._save_lock = asyncio.Lock()
@@ -114,6 +127,15 @@ class AgentPlanner:
                     "waiting_on_delegation": task.waiting_on_delegation,
                     "created_at": task.created_at.isoformat(),
                     "updated_at": task.updated_at.isoformat(),
+                    "actions": [
+                        {
+                            "action_id": action.action_id,
+                            "description": action.description,
+                            "status": action.status,
+                        }
+                        for action in task.actions
+                    ],
+                    "completion_criteria": task.metadata.get("completion_criteria", []),
                 }
                 for task_id, task in self.tasks.items()
             },
@@ -233,6 +255,9 @@ class AgentPlanner:
                 "parameters": {},
             }
 
+        if message.message_type in {MessageType.CHAT, MessageType.SYSTEM} and not task_state.actions:
+            await self._generate_task_actions(task_state, message)
+
         task_state.status = "running"
         await self._save_state()
         logger.debug(
@@ -262,6 +287,113 @@ class AgentPlanner:
                 metadata={"message_id": message_identifier},
             )
         return self.tasks[key]
+
+    async def _generate_task_actions(
+        self,
+        task_state: PlannerTaskState,
+        message: Message,
+    ) -> None:
+        actions: List[Dict[str, Any]]
+        completion_criteria: List[str]
+        dependencies: List[List[int]]
+
+        generated = await self._generate_task_plan_with_llm(message)
+        if generated:
+            actions, completion_criteria, dependencies = generated
+        else:
+            actions = [{"description": "Respond to the requester with a complete answer."}]
+            completion_criteria = ["Requester receives a clear, final response."]
+            dependencies = [[]]
+
+        for action in actions[: self.config.max_generated_actions]:
+            description = str(action.get("description", "")).strip()
+            if not description:
+                continue
+            task_state.add_action(description)
+
+        task_state.metadata["completion_criteria"] = completion_criteria
+        task_state.metadata["action_dependencies"] = dependencies
+        task_state.metadata["planning_model"] = self._task_generation_model
+        task_state.updated_at = utc_now()
+        await self._save_state()
+
+    async def _generate_task_plan_with_llm(
+        self,
+        message: Message,
+    ) -> Optional[tuple[List[Dict[str, Any]], List[str], List[List[int]]]]:
+        if not self._task_generation_model:
+            return None
+
+        system_prompt = (
+            "You decompose user requests into executable actions for an orchestrator. "
+            "Return JSON with shape: "
+            '{"actions":[{"description":"...","depends_on":[0]}],"completion_criteria":["..."]}. '
+            "Keep actions concise, actionable, and limited to at most 6 items. "
+            "Use depends_on as zero-based indices."
+        )
+        user_prompt = (
+            f"Source: {message.source}\n"
+            f"Type: {message.message_type}\n"
+            f"Request:\n{message.content}"
+        )
+
+        api_base = self._task_generation_api_config.get("api_base")
+        api_key = self._task_generation_api_config.get("api_key")
+
+        try:
+            raw = await llm_chat(
+                llm_model=self._task_generation_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                api_base=api_base,
+                api_key=api_key,
+                response_format={"type": "json_object"},
+            )
+            payload = extract_json(raw)
+        except Exception:
+            logger.exception(
+                "Failed to generate planner action list with model %s",
+                self._task_generation_model,
+            )
+            return None
+
+        actions_raw = payload.get("actions")
+        if not isinstance(actions_raw, list) or not actions_raw:
+            return None
+
+        normalized_actions: List[Dict[str, Any]] = []
+        normalized_dependencies: List[List[int]] = []
+        for idx, item in enumerate(actions_raw[: self.config.max_generated_actions]):
+            if not isinstance(item, dict):
+                continue
+            description = str(item.get("description", "")).strip()
+            if not description:
+                continue
+            depends_raw = item.get("depends_on")
+            depends_on: List[int] = []
+            if isinstance(depends_raw, list):
+                for dep in depends_raw:
+                    if isinstance(dep, int) and 0 <= dep < idx:
+                        depends_on.append(dep)
+            normalized_actions.append({"description": description})
+            normalized_dependencies.append(depends_on)
+
+        if not normalized_actions:
+            return None
+
+        criteria_raw = payload.get("completion_criteria")
+        completion_criteria: List[str] = []
+        if isinstance(criteria_raw, list):
+            completion_criteria = [
+                str(item).strip() for item in criteria_raw if str(item).strip()
+            ][:3]
+
+        if not completion_criteria:
+            completion_criteria = ["Requester receives a complete and clear response."]
+
+        return normalized_actions, completion_criteria, normalized_dependencies
 
     async def notify_tool_result(
         self,

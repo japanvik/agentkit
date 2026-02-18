@@ -8,10 +8,12 @@ creating, running, and gracefully shutting down agents.
 import asyncio
 import logging
 import signal
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Dict, List, Any
 
 from networkkit.network import ZMQMessageReceiver
 from agentkit.agents.simple_agent_factory import simple_agent_factory
+from agentkit.utils.agent_home import apply_agent_home_convention
 
 class AgentRunner:
     """
@@ -47,14 +49,15 @@ class AgentRunner:
         name: str,
         description: str,
         model: str,
-        system_prompt: str = None,
+        agent_home: str,
         user_prompt: str = None,
         agent_type: str = "SimpleAgent",
         brain_type: str = "SimpleBrain",
         memory_type: str = "SimpleMemory",
         plugins_dir: str = "plugins",
         bus_ip: str = "127.0.0.1",
-        api_config: Dict[str, Any] = None
+        api_config: Dict[str, Any] = None,
+        config_dir: str = None,
     ):
         """
         Initialize the AgentRunner with parameters for agent creation.
@@ -63,7 +66,7 @@ class AgentRunner:
             name: Name of the agent
             description: Description of the agent
             model: Model to use for the agent's brain
-            system_prompt: System prompt for the agent's brain
+            agent_home: Home directory for the agent (must include AGENTS.md)
             user_prompt: User prompt for the agent's brain
             agent_type: Type of agent to create
             brain_type: Type of brain to create
@@ -71,20 +74,27 @@ class AgentRunner:
             plugins_dir: Directory containing plugins
             bus_ip: IP address of the message bus
             api_config: API configuration for the agent
+            config_dir: Optional base directory to resolve relative agent_home paths
         """
+        normalized = apply_agent_home_convention(
+            {"name": name, "agent_home": agent_home},
+            config_dir=Path(config_dir).resolve() if config_dir else None,
+        )
         # Store parameters for agent creation
         self.agent_params = {
             "name": name,
             "description": description,
             "model": model,
-            "system_prompt": system_prompt or f"You are {name}, {description}",
+            "system_prompt": normalized["system_prompt"],
             "user_prompt": user_prompt,
             "agent_type": agent_type,
             "brain_type": brain_type,
             "memory_type": memory_type,
             "plugins_dir": plugins_dir,
             "bus_ip": bus_ip,
-            "api_config": api_config
+            "api_config": api_config,
+            "agent_home": normalized["agent_home"],
+            "config_dir": str(Path(config_dir).resolve()) if config_dir else None,
         }
         
         self.bus_ip = bus_ip

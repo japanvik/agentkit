@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from networkkit.network import ZMQMessageReceiver
 from agentkit.agents.simple_agent_factory import simple_agent_factory
 from networkkit.messages import Message
+from agentkit.utils.agent_home import apply_agent_home_convention
 
 class AgentManager:
     """
@@ -35,6 +36,7 @@ class AgentManager:
         try:
             with open(config_file, 'r') as f:
                 config = json.load(f)
+            config["_config_dir"] = str(config_file.parent.resolve())
             return config
         except json.JSONDecodeError as e:
             logging.error(f"Error parsing configuration file: {e}")
@@ -69,18 +71,24 @@ class AgentManager:
 
         for agent_conf in agents_config:
             try:
+                config_dir = Path(self.config.get("_config_dir", ".")).resolve()
+                resolved_conf = apply_agent_home_convention(
+                    agent_conf,
+                    config_dir=config_dir,
+                )
                 # Extract required parameters
-                name = agent_conf["name"]
-                description = agent_conf["description"]
-                model = agent_conf["model"]
+                name = resolved_conf["name"]
+                description = resolved_conf["description"]
+                model = resolved_conf["model"]
                 
                 # Extract optional parameters with defaults
-                agent_type = agent_conf.get("agent_type", "SimpleAgent")
-                brain_type = agent_conf.get("brain_type", "SimpleBrain")
-                memory_type = agent_conf.get("memory_type", "SimpleMemory")
-                system_prompt = agent_conf.get("system_prompt", "")
-                user_prompt = agent_conf.get("user_prompt", "")
-                api_config = agent_conf.get("api_config")
+                agent_type = resolved_conf.get("agent_type", "SimpleAgent")
+                brain_type = resolved_conf.get("brain_type", "SimpleBrain")
+                memory_type = resolved_conf.get("memory_type", "SimpleMemory")
+                system_prompt = resolved_conf.get("system_prompt", "")
+                user_prompt = resolved_conf.get("user_prompt", "")
+                api_config = resolved_conf.get("api_config")
+                agent_home = resolved_conf.get("agent_home")
                 plugins_dir = self.config.get("plugins_dir", "plugins")
                 
                 # Create agent with extracted parameters
@@ -95,7 +103,9 @@ class AgentManager:
                     memory_type=memory_type,
                     plugins_dir=plugins_dir,
                     bus_ip=bus_ip,
-                    api_config=api_config
+                    api_config=api_config,
+                    agent_home=agent_home,
+                    config_dir=str(config_dir),
                 )
                 self.agents.append(agent)
                 logging.info(f"Loaded agent: {name}")

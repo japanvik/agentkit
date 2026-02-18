@@ -3,6 +3,7 @@
 import os
 import importlib
 import logging
+from pathlib import Path
 from typing import Dict, Type, Any
 from networkkit.messages import MessageType
 from networkkit.network import HTTPMessageSender
@@ -12,6 +13,7 @@ from agentkit.agents.simple_agent import SimpleAgent
 from agentkit.brains.human_brain import HumanBrain
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.memory.simple_memory import SimpleMemory
+from agentkit.utils.agent_home import apply_agent_home_convention
 
 # Built-in implementations
 BUILTIN_AGENTS = {
@@ -88,7 +90,9 @@ def simple_agent_factory(
     ttl_minutes: int = 5,
     helo_interval: int = 300,
     cleanup_interval: int = 300,
-    api_config: dict = None
+    api_config: dict = None,
+    agent_home: str = None,
+    config_dir: str = None,
 ):
     """
     Factory function to create an agent with its corresponding Brain and Memory.
@@ -96,6 +100,16 @@ def simple_agent_factory(
     """
     # Load custom plugins if directory exists
     custom_agents, custom_brains, custom_memories = load_custom_plugins(plugins_dir)
+
+    normalized_system_prompt = system_prompt
+    normalized_agent_home = agent_home
+    if agent_home:
+        normalized = apply_agent_home_convention(
+            {"name": name, "agent_home": agent_home},
+            config_dir=Path(config_dir).resolve() if config_dir else None,
+        )
+        normalized_system_prompt = normalized["system_prompt"]
+        normalized_agent_home = normalized["agent_home"]
     
     # Initialize the message sender
     message_sender = HTTPMessageSender(publish_address=f"http://{bus_ip}:8000")
@@ -109,7 +123,7 @@ def simple_agent_factory(
     agent_config = {
         'description': description,
         'model': model,
-        'system_prompt': system_prompt,
+        'system_prompt': normalized_system_prompt,
         'user_prompt': user_prompt,
         'api_config': api_config,
         'bus_ip': bus_ip,
@@ -119,7 +133,8 @@ def simple_agent_factory(
         'cleanup_interval': cleanup_interval,
         'brain_type': brain_type,  # Add brain type to config
         'memory_type': memory_type,  # Add memory type to config
-        'plugins_dir': plugins_dir  # Add plugins dir for custom components
+        'plugins_dir': plugins_dir,  # Add plugins dir for custom components
+        'agent_home': normalized_agent_home,
     }
 
     # Create the Agent instance
