@@ -6,32 +6,5 @@
   "planner_model": "ollama/qwen3-coder:480b-cloud",
   "user_prompt": "Conversation history:\n{context}\nSophia:",
   "bus_ip": "127.0.0.1",
-  "send_message_backend": "mcp",
-  "mcp_send_message_function": "networkkit::send_message",
-  "api_config": {},
-  "mcp_servers": [
-    {
-      "name": "fetch-mcp",
-      "transport": "stdio",
-      "command": "node",
-      "args": [
-        "/Users/vkumar/Documents/Cline/MCP/fetch-mcp/dist/index.js"
-      ],
-      "namespace": "fetch"
-    },
-    {
-      "name": "networkkit-send-message",
-      "transport": "stdio",
-      "command": "/Users/vkumar/Development/networkkit/.venv/bin/python",
-      "args": [
-        "-m",
-        "networkkit.mcp.send_message_server",
-        "--publish-address",
-        "http://127.0.0.1:8000",
-        "--agent-name",
-        "Sophia"
-      ],
-      "namespace": "networkkit"
-    }
-  ]
+  "api_config": {}
 }

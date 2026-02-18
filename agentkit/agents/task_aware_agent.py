@@ -136,8 +136,25 @@ class TaskAwareAgent(BaseAgent):
         Args:
             message: The message to handle.
         """
+        # Task-aware orchestration should only react to directly addressed
+        # traffic (or broadcasts), not attention-based side channels.
+        if message.to not in {self.name, "ALL"} and message.source != self.name:
+            return
+
         # Only handle messages intended for this agent
         if not self.is_intended_for_me(message):
+            return
+
+        raw_kind = getattr(message.message_type, "value", message.message_type)
+        message_kind = str(raw_kind).upper()
+        if message_kind not in {"CHAT", "HELO", "ACK"}:
+            return
+
+        # Ignore our own HELO/ACK frames to prevent self-ack chatter.
+        if message.source == self.name:
+            logger.debug("Self-message observed type=%s normalized=%s", message.message_type, message_kind)
+        if message.source == self.name and message_kind in {"HELO", "ACK"}:
+            logger.debug("Ignoring self %s frame", message_kind)
             return
 
         if await self._handle_delegate_reply_shortcut(message):
@@ -276,6 +293,25 @@ class TaskAwareAgent(BaseAgent):
                     logger.error(f"Error processing task: {e}", exc_info=True)
                     if self._current_task:
                         self._current_task.mark_failed(str(e))
+                    failed_message = task.message if task else None
+                    if (
+                        failed_message
+                        and str(getattr(failed_message.message_type, "value", failed_message.message_type)).upper() == "CHAT"
+                        and failed_message.source != self.name
+                        and failed_message.to in {self.name, "ALL"}
+                    ):
+                        try:
+                            await self.functions_registry.execute(
+                                function="send_message",
+                                parameters={
+                                    "recipient": failed_message.source,
+                                    "content": "I hit an internal error while processing your chat request.",
+                                    "message_type": "CHAT",
+                                },
+                                context=ToolExecutionContext(agent=self),
+                            )
+                        except Exception:
+                            logger.exception("Failed to send error fallback message")
                 finally:
                     self._current_task = None
                     self.task_queue.task_done()
