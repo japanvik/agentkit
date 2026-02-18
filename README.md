@@ -143,7 +143,17 @@ To interact with the LLM-powered chat bot above, launch the agent with the human
    python ./config_agent.py --config ./config/human_agent.json --loglevel WARN
    ```
 
-   Once the command line prompt appears, begin typing your messages. The chat bot will respond according to the capabilities defined in its configuration.
+   Once the prompt appears, you can use a multi-agent chat-room style interface:
+
+   - Plain text sends to the current channel (broadcast as `ALL`)
+   - `/join <channel>` switches channels (default `#general`)
+   - `/dm <agent> <message>` sends a direct message
+   - `/reply <message>` replies to the most recent sender
+   - `/agents` lists discovered agents
+   - `/history [N]` shows recent timeline entries
+   - `/help` shows all commands
+
+   Japanese input/output is supported out of the box (UTF-8).
 
 ## Further Assistance
 
