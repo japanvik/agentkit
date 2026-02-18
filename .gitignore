@@ -30,3 +30,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+.env
+poetry.lock
+agent_state/TestAgent_planner_state.json
+agent_state/sophia/Sophia_planner_state.json

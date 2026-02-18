@@ -82,6 +82,8 @@ class BaseAgent(MessageSender):
         self._message_sender = message_sender
         self._running = False
         self._tasks: List[asyncio.Task[Any]] = []
+        self._mcp_manager = None
+        self._mcp_registry_configured = False
         self.message_handlers: Dict[MessageType, List[Callable]] = {}
         
         # Create component config with self as MessageSender
@@ -267,6 +269,8 @@ class BaseAgent(MessageSender):
             ]
         )
         
+        self._configure_mcp_manager(functions_registry)
+
         if functions_registry.has_function("send_message"):
             return
         
@@ -594,6 +598,7 @@ class BaseAgent(MessageSender):
             await self._send_helo()
         except Exception:
             logger.exception("Agent %s failed to broadcast HELO", self.name)
+        await self._start_mcp_manager()
 
     async def _acknowledge_helo(self, message: Message) -> None:
         """
@@ -722,5 +727,52 @@ class BaseAgent(MessageSender):
                 logger.info("Closed message sender for agent %s", self.name)
             except Exception:
                 logger.exception("Error closing message sender")
+        if self._mcp_manager:
+            try:
+                await asyncio.wait_for(self._mcp_manager.stop(), timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("Timed out while stopping MCP manager for agent %s", self.name)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "MCP manager shutdown was cancelled for agent %s; continuing stop",
+                    self.name,
+                )
+            except Exception:
+                logger.exception("Error while stopping MCP manager for agent %s", self.name)
         
         logger.info("Agent %s stopped", self.name)
+
+    # ------------------------------------------------------------------ #
+    # MCP integration helpers
+    # ------------------------------------------------------------------ #
+
+    def _configure_mcp_manager(self, functions_registry) -> None:
+        if self._mcp_registry_configured:
+            return
+
+        server_configs = self.config.get("mcp_servers") or []
+        if not server_configs:
+            self._mcp_registry_configured = True
+            return
+
+        try:
+            from agentkit.mcp import MCPClientManager
+        except ImportError:
+            logger.warning("agentkit.mcp package missing; MCP servers will be unavailable.")
+            self._mcp_registry_configured = True
+            return
+
+        manager = MCPClientManager.from_config(self, functions_registry, server_configs)
+        if manager is None:
+            self._mcp_registry_configured = True
+            return
+
+        self._mcp_manager = manager
+        self._mcp_registry_configured = True
+
+    async def _start_mcp_manager(self) -> None:
+        if self._mcp_manager:
+            try:
+                await self._mcp_manager.start()
+            except Exception:
+                logger.exception("Failed to start MCP client manager for agent %s", self.name)

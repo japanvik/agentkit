@@ -95,7 +95,23 @@ async def llm_chat(
 
     # Generate response using LLM
     response = await acompletion(**completion_params)
-    return response.choices[0].message.content.strip()
+
+    try:
+        content = response.choices[0].message.content
+    except Exception:
+        logging.exception("LLM response missing content payload")
+        raise
+
+    # Anthropic-style responses sometimes wrap JSON in ```json fences.
+    if isinstance(content, str):
+        content = content.strip()
+        if content.startswith("```") and content.endswith("```"):
+            # Strip triple backticks without assuming language tag length
+            stripped = content.strip("`")
+            if stripped.startswith("json"):
+                stripped = stripped[4:]
+            content = stripped.strip()
+    return content
 
 def extract_json(text: str) -> dict:
     """

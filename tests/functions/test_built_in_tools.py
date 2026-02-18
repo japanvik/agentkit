@@ -63,6 +63,66 @@ async def test_send_message_tool(mock_agent):
 
 
 @pytest.mark.asyncio
+async def test_send_message_tool_prefers_mcp_when_enabled(mock_agent):
+    """Test that send_message uses configured MCP function when enabled."""
+    mock_agent.config = {
+        "send_message_backend": "mcp",
+        "mcp_send_message_function": "networkkit::send_message",
+    }
+    mock_agent.functions_registry = MagicMock()
+    mock_agent.functions_registry.has_function.return_value = True
+    mock_agent.functions_registry.execute = AsyncMock(
+        return_value={
+            "raw": {
+                "status": "sent",
+                "message_id": "mcp-123",
+                "recipient": "recipient",
+                "message_type": "CHAT",
+            }
+        }
+    )
+
+    result = await send_message_tool(
+        ToolExecutionContext(agent=mock_agent),
+        recipient="recipient",
+        content="Hello over MCP",
+        message_type="CHAT",
+    )
+
+    mock_agent.functions_registry.execute.assert_awaited_once()
+    mock_agent._internal_send_message.assert_not_awaited()
+    assert result["status"] == "sent"
+    assert result["message_id"] == "mcp-123"
+    assert result["recipient"] == "recipient"
+    assert result["message_type"] == "CHAT"
+
+
+@pytest.mark.asyncio
+async def test_send_message_tool_falls_back_when_mcp_call_fails(mock_agent):
+    """Test that send_message falls back to direct send when MCP invocation fails."""
+    mock_agent.config = {
+        "send_message_backend": "mcp",
+        "mcp_send_message_function": "networkkit::send_message",
+    }
+    mock_agent.functions_registry = MagicMock()
+    mock_agent.functions_registry.has_function.return_value = True
+    mock_agent.functions_registry.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+    result = await send_message_tool(
+        ToolExecutionContext(agent=mock_agent),
+        recipient="recipient",
+        content="Fallback please",
+        message_type="CHAT",
+    )
+
+    mock_agent.functions_registry.execute.assert_awaited_once()
+    mock_agent._internal_send_message.assert_awaited_once()
+    assert result["status"] == "sent"
+    assert result["recipient"] == "recipient"
+    assert result["message_type"] == "CHAT"
+
+
+@pytest.mark.asyncio
 async def test_register_tools():
     """Test that the register_tools method registers the send_message tool."""
     # Create a functions registry

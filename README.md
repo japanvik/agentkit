@@ -12,7 +12,7 @@ Install `AgentKit` using pip:
 pip install agentkit
 ```
 
-Ensure you have Python 3.8 or higher installed to meet the compatibility requirements.
+Ensure you have Python 3.10 or higher installed to meet the compatibility requirements.
 
 ## Features
 
@@ -23,6 +23,26 @@ Ensure you have Python 3.8 or higher installed to meet the compatibility require
 - **Asynchronous Operation Supported**: The architecture supports asynchronous operations, essential for maintaining high performance in distributed systems where blocking operations can create bottlenecks.
 
 - **Built-in Logging and Monitoring**: Integrated logging tracks message flows and system activity, providing valuable insights during development and troubleshooting phases.
+
+### Model Context Protocol (MCP) Integration
+
+- **Per-agent MCP tool catalogs**: Each agent can declare its own list of MCP servers. Tools discovered from those servers are automatically surfaced through the AgentKit functions registry, allowing LLM-driven planners to call them like any other function.
+- **Namespace isolation**: Tools are exposed using a `<server>::<tool>` naming convention so that specialized agents can connect to different MCP stacks without name collisions.
+- **Powered by the official SDK**: AgentKit now depends on the `mcp` package, ensuring first-class support for the Model Context Protocol standard and future enhancements.
+
+Sample snippet from an agent configuration:
+
+```json
+"mcp_servers": [
+  {
+    "name": "filesystem",
+    "transport": "stdio",
+    "command": "python",
+    "args": ["-m", "mcp_servers.fs"],
+    "namespace": "fs"
+  }
+]
+```
 
 ## Why AgentKit?
 

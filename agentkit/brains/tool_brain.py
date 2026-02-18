@@ -8,7 +8,6 @@ except ImportError:  # pragma: no cover
 
 import logging
 import json
-
 from agentkit.brains.simple_brain import SimpleBrain
 from agentkit.memory.memory_protocol import Memory
 from agentkit.processor import llm_chat, extract_json
@@ -138,7 +137,11 @@ class ToolBrain(SimpleBrain):
         last_tool_result: Any = None
         followup_prompt: str = ""
 
+        verification_attempted = False
+        iterations_used = 0
+
         for iteration in range(max_iterations):
+            iterations_used = iteration + 1
             response = await self.generate_chat_response(extra_system_prompt=followup_prompt)
             followup_prompt = ""
             self.memory_manager.remember(response)
@@ -242,11 +245,122 @@ class ToolBrain(SimpleBrain):
                     tool_parameters=last_tool_parameters or {},
                 ):
                     return
-            fallback_content = (
-                "Here's what I found from the most recent tool run:\n"
-                f"{summary}\n\n"
-                "Let me know if you'd like me to dig deeper, retry with a different approach, or format the result differently."
+                if not verification_attempted:
+                    decision = await self._verify_task_completion(
+                        user_request=message.content,
+                        summary=summary,
+                        last_tool_name=last_tool_name,
+                        last_tool_parameters=last_tool_parameters or {},
+                    )
+                    verification_attempted = True
+                    if decision:
+                        action = decision.get("action")
+                        if action == "send_message":
+                            content = decision.get("content", "").strip() or summary
+                            await self._send_message_to_recipient(
+                                content,
+                                original_sender,
+                                tool_context=tool_context,
+                            )
+                            return
+                        if (
+                            action == "call_tool"
+                            and iterations_used < max_iterations + 1
+                        ):
+                            next_function = decision.get("function")
+                            parameters = decision.get("parameters") or {}
+                            if next_function and self.functions_registry.has_function(next_function):
+                                try:
+                                    next_result = await self.functions_registry.execute(
+                                        next_function,
+                                        parameters,
+                                        context=tool_context,
+                                    )
+                                except Exception:
+                                    logging.exception(
+                                        "Verification-triggered tool '%s' failed",
+                                        next_function,
+                                    )
+                                else:
+                                    self._record_tool_observation(
+                                        next_function,
+                                        parameters,
+                                        next_result,
+                                    )
+                                    summary = self._summarize_tool_result(next_function, next_result)
+                                    if await self._attempt_final_response(
+                                        summary=summary,
+                                        recipient=original_sender,
+                                        user_request=message.content,
+                                        tool_name=next_function,
+                                        tool_parameters=parameters,
+                                    ):
+                                        return
+                                    last_tool_name = next_function
+                                    last_tool_parameters = parameters
+                                    last_tool_result = next_result
+                                    issue_hint = self._tool_issue_hint(next_result)
+                                    iterations_used += 1
+                                    if not issue_hint:
+                                        synthesized = await self._synthesize_fallback_response(
+                                            user_request=message.content,
+                                            summary=summary,
+                                            tool_name=next_function,
+                                            tool_result=next_result,
+                                        )
+                                        if synthesized:
+                                            await self._send_message_to_recipient(
+                                                synthesized,
+                                                original_sender,
+                                                tool_context=tool_context,
+                                            )
+                                            return
+                                        fallback_content = (
+                                            "Here's what I found from the most recent tool run:\n"
+                                            f"{summary}\n\n"
+                                            "Let me know if you'd like me to dig deeper, retry with a different approach, or format the result differently."
+                                        )
+                                        # Proceed to send fallback below using updated summary
+                                    else:
+                                        summary = self._summarize_tool_result(next_function, next_result)
+                                    # fall through to fallback message if needed
+                            else:
+                                logging.warning("Verification suggested unavailable tool '%s'", next_function)
+            synthesized = await self._synthesize_fallback_response(
+                user_request=message.content,
+                summary=summary,
+                tool_name=last_tool_name,
+                tool_result=last_tool_result,
             )
+            if synthesized:
+                await self._send_message_to_recipient(
+                    synthesized,
+                    original_sender,
+                    tool_context=tool_context,
+                )
+                return
+            if summary:
+                fallback_content = (
+                    "Here's what I found from the most recent tool run:\n"
+                    f"{summary}\n\n"
+                    "Let me know if you'd like me to dig deeper, retry with a different approach, or format the result differently."
+                )
+            else:
+                synthesized = await self._synthesize_failure_response(
+                    user_request=message.content,
+                    reason="No tools were executed successfully before planning halted.",
+                )
+                if synthesized:
+                    await self._send_message_to_recipient(
+                        synthesized,
+                        original_sender,
+                        tool_context=tool_context,
+                    )
+                    return
+                fallback_content = (
+                    "I wasn't able to make progress on that request. "
+                    "If you can share a specific source or more details, I can try again."
+                )
         await self._send_message_to_recipient(
             fallback_content,
             original_sender,
@@ -675,6 +789,166 @@ class ToolBrain(SimpleBrain):
         except Exception:
             logging.exception("Failed to execute final send_message response")
             return False
+
+    async def _verify_task_completion(
+        self,
+        *,
+        user_request: str,
+        summary: str,
+        last_tool_name: str,
+        last_tool_parameters: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Ask the LLM to verify whether the user's request has been satisfied.
+
+        Returns a structured directive:
+            {"action": "send_message", "content": "..."} or
+            {"action": "call_tool", "function": "...", "parameters": {...}, "reason": "..."}
+        """
+        if not self.component_config:
+            return None
+
+        available_tools = ", ".join(sorted(self.functions_registry.function_map.keys()))
+        verifier_system_prompt = (
+            "You are a verification assistant ensuring that an agent has satisfied the user's latest request. "
+            "Review the summary of the most recent tool results and decide the next step. "
+            "Respond with a JSON object in one of two forms:\n"
+            '{ "action": "send_message", "content": "<final reply to user>" }\n'
+            'or\n'
+            '{ "action": "call_tool", "function": "<tool name>", "parameters": { ... }, "reason": "<why more work is needed>" }.\n'
+            "If you choose send_message, ensure the content fully answers the user. "
+            "Only choose call_tool if additional steps are required and specify valid parameters."
+        )
+        verifier_user_prompt = (
+            f"User request:\n{user_request}\n\n"
+            f"Latest tool used: {last_tool_name} with parameters {json.dumps(last_tool_parameters, ensure_ascii=False)}\n"
+            f"Summary of tool output:\n{summary}\n\n"
+            f"Available tools: {available_tools}"
+        )
+
+        try:
+            response = await llm_chat(
+                llm_model=self.model,
+                messages=[
+                    {"role": "system", "content": verifier_system_prompt},
+                    {"role": "user", "content": verifier_user_prompt},
+                ],
+                api_base=self.api_config.get("api_base"),
+                api_key=self.api_config.get("api_key"),
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            logging.exception("Verification LLM call failed")
+            return None
+
+        try:
+            decision = json.loads(response)
+        except Exception:
+            try:
+                decision = extract_json(response)
+            except Exception:
+                logging.warning("Verification step did not return valid JSON")
+                return None
+
+        if not isinstance(decision, dict):
+            return None
+
+        action = decision.get("action")
+        if action == "send_message":
+            content = decision.get("content")
+            if content:
+                return {"action": "send_message", "content": content}
+            return None
+        if action == "call_tool":
+            function = decision.get("function")
+            parameters = decision.get("parameters") or {}
+            reason = decision.get("reason")
+            payload = {"action": "call_tool", "function": function, "parameters": parameters}
+            if reason:
+                payload["reason"] = reason
+            return payload
+        return None
+
+    async def _synthesize_fallback_response(
+        self,
+        *,
+        user_request: str,
+        summary: str,
+        tool_name: str,
+        tool_result: Any,
+    ) -> Optional[str]:
+        """Generate a concise human-friendly reply from the gathered tool output."""
+        if not summary and not tool_result:
+            return None
+
+        try:
+            if isinstance(tool_result, (dict, list)):
+                raw_result = json.dumps(tool_result, ensure_ascii=False)
+            else:
+                raw_result = str(tool_result)
+        except Exception:
+            raw_result = str(tool_result)
+
+        raw_excerpt = self._truncate(raw_result, limit=4000)
+        synthesis_prompt = (
+            "Summarize the retrieved information for the user. Provide a clear, concise response "
+            "covering the main points relevant to their request. If information is missing, state what could not be found."
+        )
+        user_payload = (
+            f"User request:\n{user_request}\n\n"
+            f"Tool used: {tool_name}\n"
+            f"Tool summary:\n{summary}\n\n"
+            f"Raw result excerpt:\n{raw_excerpt}"
+        )
+
+        try:
+            response = await llm_chat(
+                llm_model=self.model,
+                messages=[
+                    {"role": "system", "content": synthesis_prompt},
+                    {"role": "user", "content": user_payload},
+                ],
+                api_base=self.api_config.get("api_base"),
+                api_key=self.api_config.get("api_key"),
+            )
+        except Exception:
+            logging.exception("Failed to synthesize fallback response")
+            return None
+
+        cleaned = (response or "").strip()
+        return cleaned or None
+
+    async def _synthesize_failure_response(
+        self,
+        *,
+        user_request: str,
+        reason: str,
+    ) -> Optional[str]:
+        """Craft a helpful response when no tools succeeded."""
+        prompt = (
+            "You are an assistant who must acknowledge that automated tools could not satisfy the user's request. "
+            "Explain the limitation clearly, offer constructive next steps, and ask for any extra details that could help."
+        )
+        user_payload = (
+            f"User request:\n{user_request}\n\n"
+            f"Why the automation failed:\n{reason}"
+        )
+        try:
+            response = await llm_chat(
+                llm_model=self.model,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_payload},
+                ],
+                api_base=self.api_config.get("api_base"),
+                api_key=self.api_config.get("api_key"),
+            )
+        except Exception:
+            logging.exception("Failed to synthesize failure response")
+            return None
+
+        cleaned = (response or "").strip()
+        return cleaned or None
 
     def _build_retry_prompt(
         self,
