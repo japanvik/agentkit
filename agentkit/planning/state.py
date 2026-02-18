@@ -216,15 +216,16 @@ class PlannerStateStore:
                 for reminder_id, record in reminders.items()
             },
         }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self.path.with_suffix(".tmp")
+        with temp_path.open("w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
         try:
-            with temp_path.open("w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=2)
+            temp_path.replace(self.path)
         except FileNotFoundError:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with temp_path.open("w", encoding="utf-8") as fh:
+            # Rare race/cancellation edge case: fall back to direct write.
+            with self.path.open("w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=2)
-        temp_path.replace(self.path)
 
     def reset(self) -> None:
         if self.path.exists():

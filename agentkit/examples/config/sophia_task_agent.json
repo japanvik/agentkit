@@ -1,10 +1,37 @@
 {
   "name": "Sophia",
   "description": "A thoughtful task-aware assistant who can plan, delegate, and execute tools.",
-  "model": "openai/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "model": "ollama/qwen3-coder:480b-cloud",
   "system_prompt": "You are Sophia, a wise and proactive AI assistant. Use the available tools to solve problems, gather information, and keep humans informed.",
   "user_prompt": "Conversation history:\n{context}\nSophia:",
   "bus_ip": "127.0.0.1",
+  "send_message_backend": "mcp",
+  "mcp_send_message_function": "networkkit::send_message",
   "planner_state_dir": "agent_state/sophia",
-  "api_config": {}
+  "api_config": {},
+  "mcp_servers": [
+    {
+      "name": "fetch-mcp",
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/vkumar/Documents/Cline/MCP/fetch-mcp/dist/index.js"
+      ],
+      "namespace": "fetch"
+    },
+    {
+      "name": "networkkit-send-message",
+      "transport": "stdio",
+      "command": "/Users/vkumar/Development/networkkit/.venv/bin/python",
+      "args": [
+        "-m",
+        "networkkit.mcp.send_message_server",
+        "--publish-address",
+        "http://127.0.0.1:8000",
+        "--agent-name",
+        "Sophia"
+      ],
+      "namespace": "networkkit"
+    }
+  ]
 }

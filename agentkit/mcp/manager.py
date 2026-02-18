@@ -127,6 +127,16 @@ class MCPServerConnection:
             return
         try:
             await self._exit_stack.aclose()
+        except asyncio.CancelledError:  # pragma: no cover
+            logger.warning(
+                "Cancellation raised while shutting down MCP server '%s'; forcing close",
+                self.config.name,
+            )
+        except RuntimeError:  # pragma: no cover
+            logger.warning(
+                "Runtime error while shutting down MCP server '%s'; forcing close",
+                self.config.name,
+            )
         except Exception:  # pragma: no cover
             logger.exception("Error while shutting down MCP server '%s'", self.config.name)
         self._session = None

@@ -732,6 +732,13 @@ class BaseAgent(MessageSender):
                 await asyncio.wait_for(self._mcp_manager.stop(), timeout=5)
             except asyncio.TimeoutError:
                 logger.warning("Timed out while stopping MCP manager for agent %s", self.name)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "MCP manager shutdown was cancelled for agent %s; continuing stop",
+                    self.name,
+                )
+            except Exception:
+                logger.exception("Error while stopping MCP manager for agent %s", self.name)
         
         logger.info("Agent %s stopped", self.name)
 
