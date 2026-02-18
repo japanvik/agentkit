@@ -120,6 +120,14 @@ class ToolBrain(SimpleBrain):
         request_intent = "general"
         if not delegated_reply:
             request_intent = await self._classify_request_intent(message.content)
+        requester_is_human = self._looks_human_requester(requester)
+        logging.debug(
+            "ToolBrain request intent=%s delegated_reply=%s requester=%s source=%s",
+            request_intent,
+            delegated_reply,
+            requester,
+            original_sender,
+        )
         self.component_config.message_sender.attention = requester
 
         # If this message is a reply from a delegated agent, immediately relay it
@@ -226,16 +234,27 @@ class ToolBrain(SimpleBrain):
                 break
 
             parameters = function_data.get("parameters", {}) or {}
+            logging.debug(
+                "ToolBrain proposed function=%s parameters=%s intent=%s delegated_reply=%s",
+                function_name,
+                parameters,
+                request_intent,
+                delegated_reply,
+            )
 
             if (
                 function_name == "schedule_reminder"
                 and request_intent != "long_running_followup"
-                and self._has_pending_delegation_for_requester(requester)
+                and (
+                    self._has_pending_delegation_for_requester(requester)
+                    or not requester_is_human
+                )
             ):
                 if iteration < max_iterations - 1:
                     followup_prompt = (
-                        "Do not schedule reminders for this request. The user asked you to wait for a delegate's "
-                        "reply and report it back immediately. Wait for the delegate reply and then send the final answer."
+                        "Do not schedule reminders for this request. "
+                        "If the requester is another agent, return a direct answer now. "
+                        "If waiting for a delegated reply, wait for that reply and then send the final answer."
                     )
                     continue
                 break
@@ -243,8 +262,39 @@ class ToolBrain(SimpleBrain):
             if function_name == "schedule_reminder" and "recipient" not in parameters:
                 parameters["recipient"] = requester
 
+            if (
+                function_name == "send_message"
+                and request_intent == "delegate_and_wait_for_reply"
+                and not delegated_reply
+            ):
+                requested_recipient = str(parameters.get("recipient", "")).strip()
+                if requested_recipient and requested_recipient != requester:
+                    self._track_pending_delegation(
+                        requester=requester,
+                        target=requested_recipient,
+                        intent=request_intent,
+                    )
+                elif iteration < max_iterations - 1:
+                    followup_prompt = (
+                        "Do not send a final response yet. "
+                        "For this request you must first call delegate_task to the requested agent, "
+                        "wait for that agent's reply, and only then send the final answer."
+                    )
+                    continue
+                else:
+                    break
+
             if function_name == "send_message":
-                parameters["recipient"] = requester
+                requested_recipient = str(parameters.get("recipient", "")).strip()
+                if (
+                    request_intent == "delegate_and_wait_for_reply"
+                    and not delegated_reply
+                    and requested_recipient
+                    and requested_recipient != requester
+                ):
+                    parameters["recipient"] = requested_recipient
+                else:
+                    parameters["recipient"] = requester
                 await self.functions_registry.execute(
                     "send_message",
                     parameters,
@@ -664,6 +714,13 @@ class ToolBrain(SimpleBrain):
                 return True
         return False
 
+    @staticmethod
+    def _looks_human_requester(requester: str) -> bool:
+        name = (requester or "").strip().lower()
+        if not name:
+            return False
+        return "human" in name
+
     async def _classify_request_intent(self, user_request: str) -> str:
         text = (user_request or "").strip()
         if not text:
@@ -689,12 +746,58 @@ class ToolBrain(SimpleBrain):
             )
             payload = extract_json(response)
         except Exception:
-            return "general"
+            return self._heuristic_request_intent(text)
 
         intent = str(payload.get("intent", "general")).strip().lower()
         if intent not in {"delegate_and_wait_for_reply", "long_running_followup", "general"}:
-            return "general"
+            return self._heuristic_request_intent(text)
+        if intent == "general":
+            return self._heuristic_request_intent(text)
         return intent
+
+    @staticmethod
+    def _heuristic_request_intent(user_request: str) -> str:
+        text = (user_request or "").strip()
+        lower = text.lower()
+
+        has_send = (
+            "send" in lower
+            or "message" in lower
+            or "chat" in lower
+            or "送" in text
+            or "メッセージ" in text
+        )
+        has_wait = (
+            "wait" in lower
+            or "after" in lower
+            or "待" in text
+        )
+        has_reply = (
+            "reply" in lower
+            or "respond" in lower
+            or "report back" in lower
+            or "what" in lower and "repl" in lower
+            or "返事" in text
+            or "返信" in text
+            or "回答" in text
+        )
+        if has_send and has_wait and has_reply:
+            return "delegate_and_wait_for_reply"
+
+        has_followup = (
+            "status update" in lower
+            or "follow up" in lower
+            or "check back" in lower
+            or "remind" in lower
+            or "later" in lower
+            or "進捗" in text
+            or "あとで" in text
+            or "リマインド" in text
+        )
+        if has_followup:
+            return "long_running_followup"
+
+        return "general"
 
     @staticmethod
     def _truncate(value: str, *, limit: int) -> str:

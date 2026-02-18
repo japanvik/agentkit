@@ -127,6 +127,30 @@ async def test_handle_message(task_aware_agent):
 
 
 @pytest.mark.asyncio
+async def test_handle_message_ignores_attention_side_channel(task_aware_agent):
+    await task_aware_agent.start()
+
+    try:
+        task_aware_agent.attention = "Sophia"
+        original_put = task_aware_agent.task_queue.put
+        task_aware_agent.task_queue.put = MagicMock(wraps=original_put)
+
+        message = Message(
+            source="Sophia",
+            to="Human",
+            content="not for you",
+            message_type=MessageType.CHAT,
+        )
+
+        await task_aware_agent.handle_message(message)
+        await asyncio.sleep(0.05)
+
+        task_aware_agent.task_queue.put.assert_not_called()
+    finally:
+        await task_aware_agent.stop()
+
+
+@pytest.mark.asyncio
 async def test_add_task(task_aware_agent):
     """Test adding a task to a TaskAwareAgent."""
     # Start the agent
@@ -270,3 +294,36 @@ async def test_delegate_reply_shortcut_two_agent_flow():
     assert ("Sophia", "Worker", "ping-two-agent", MessageType.CHAT) in routed
     assert ("Worker", "Sophia", "ping-two-agent", MessageType.CHAT) in routed
     assert ("Sophia", "Human", "ping-two-agent", MessageType.CHAT) in routed
+
+
+@pytest.mark.asyncio
+async def test_chat_failure_sends_error_reply():
+    bus = InMemoryMessageBus()
+    agent = TaskAwareAgent(
+        name="TestAgent",
+        config={"name": "TestAgent", "planner_state_dir": "agent_state/test_chat_failure"},
+        message_sender=bus,
+    )
+    bus.register(agent)
+
+    await agent.start()
+    try:
+        agent.planner.plan_for_message = AsyncMock(side_effect=RuntimeError("boom"))
+
+        inbound = Message(
+            source="Human",
+            to="TestAgent",
+            content="hello",
+            message_type=MessageType.CHAT,
+        )
+        await agent.handle_message(inbound)
+        await asyncio.sleep(0.15)
+
+        routed = [
+            (msg.source, msg.to, msg.content, msg.message_type)
+            for msg in bus.messages
+            if msg.message_type == MessageType.CHAT
+        ]
+        assert ("TestAgent", "Human", "I hit an internal error while processing your chat request.", MessageType.CHAT) in routed
+    finally:
+        await agent.stop()
