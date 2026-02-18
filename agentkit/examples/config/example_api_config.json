@@ -4,7 +4,7 @@
         {
             "name": "Assistant",
             "description": "A helpful AI assistant",
-            "system_prompt": "You are a helpful AI assistant that provides clear and concise responses.",
+            "agent_home": "../agent_homes/Assistant",
             "model": "gpt-4",
             "agent_type": "SimpleAgent",
             "brain_type": "SimpleBrain",

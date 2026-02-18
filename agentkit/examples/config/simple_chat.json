@@ -6,7 +6,7 @@
             "name": "Julia",
             "description": "A helpful AI assistant.",
             "model": "ollama/qwen3",
-            "system_prompt": "You are a friendly and helpful AI agent called {name}.",
+            "agent_home": "../agent_homes/Julia",
             "agent_type": "SimpleAgent",
             "brain_type": "SimpleBrain",
             "memory_type": "SimpleMemory"

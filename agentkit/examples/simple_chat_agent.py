@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 
 # Import modules from agentkit framework
 from agentkit.utils import AgentRunner
@@ -27,9 +28,7 @@ async def main():
     name="Julia",
     description="A friendly AI assistant",
     model="ollama/qwen3",
-    system_prompt="""You are a friendly and helpful AI agent called Julia.
-    You will be given the current conversation history so continue the conversation.
-    """,
+    agent_home=str(Path(__file__).parent / "agent_homes" / "Julia"),
     user_prompt="Continue the conversation:\n{context}\n{name}:"
   )
   

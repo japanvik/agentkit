@@ -545,6 +545,10 @@ class BaseAgent(MessageSender):
         # Only handle messages intended for this agent
         if not self.is_intended_for_me(message):
             return
+
+        # Ignore our own HELO broadcasts; they should not trigger self-ACK loops.
+        if message.message_type == MessageType.HELO and message.source == self.name:
+            return
             
         # Check for registered handlers first
         handlers = self.message_handlers.get(message.message_type, [])

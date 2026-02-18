@@ -74,6 +74,7 @@ For simplified agent creation and lifecycle management, AgentKit provides the `A
 
 ```python
 import asyncio
+from pathlib import Path
 from agentkit.utils import AgentRunner
 
 async def main():
@@ -81,7 +82,7 @@ async def main():
         name="Julia",
         description="A friendly AI assistant",
         model="ollama/qwen3",
-        system_prompt="You are a friendly and helpful AI agent."
+        agent_home=str(Path("agentkit/examples/agent_homes/Julia").resolve())
     )
     
     await runner.run()
@@ -97,6 +98,39 @@ This utility handles:
 - Proper resource cleanup
 
 TODO: Add more examples of AgentRunner configuration options
+
+### Agent Home Convention
+
+AgentKit now uses a per-agent home directory for durable state, working files, and prompt instructions.
+
+Each configured agent must provide `agent_home`, and that directory must contain an `AGENTS.md` file. The content of `AGENTS.md` is loaded as the system prompt.
+
+Expected layout:
+
+```text
+<agent_home>/
+  AGENTS.md
+  state/
+  tasks/
+  workspace/
+  logs/
+```
+
+The runtime ensures these subdirectories exist when the agent is loaded.
+
+Example `sophia_task_agent.json`:
+
+```json
+{
+  "name": "Sophia",
+  "description": "A thoughtful task-aware assistant who can plan, delegate, and execute tools.",
+  "agent_home": "../agent_homes/Sophia",
+  "model": "ollama/qwen3-coder:480b-cloud",
+  "planner_model": "ollama/qwen3-coder:480b-cloud",
+  "user_prompt": "Conversation history:\n{context}\nSophia:",
+  "bus_ip": "127.0.0.1"
+}
+```
 
 ## Documentation
 
@@ -122,7 +156,7 @@ To run a chat bot agent that utilizes the Data Bub for sending and receiving mes
    Ensure you have the latest version of the example files from the `examples` directory.
 
 2. **Configure the Agent**:
-   Examine and modify the configuration file (`simple_chat.json`) to fit your setup. By default, the agent is configured to interact with [Ollama](https://ollama.com/) running on localhost.
+   Examine and modify the configuration file (`simple_chat.json`) to fit your setup. By default, the agent is configured to interact with [Ollama](https://ollama.com/) running on localhost. Ensure each agent has an `agent_home` path and that `AGENTS.md` exists there.
 
    Update the configuration settings for the model and identity as necessary. For using other LLMs like OpenAI's models, refer to the [Litellm documentation](https://docs.litellm.ai/docs/) for details on specifying API keys and model settings.
 

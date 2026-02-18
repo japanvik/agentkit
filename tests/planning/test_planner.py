@@ -14,6 +14,7 @@ from agentkit.functions.functions_registry import FunctionDescriptor, ParameterD
 class DummyAgent:
     def __init__(self, name: str = "PlannerAgent"):
         self.name = name
+        self.config = {}
         self._tasks = []
         self.last_message = None
 
@@ -148,3 +149,55 @@ async def test_schedule_recurring_reminder(planner):
     updated = planner.reminders[reminder.reminder_id]
     assert updated.next_run > original_next
     assert updated.status == "scheduled"
+
+
+@pytest.mark.asyncio
+async def test_plan_generates_actions_with_planner_model(tmp_path: Path, functions_registry, monkeypatch):
+    agent = DummyAgent()
+    config = PlannerConfig(
+        persistence_dir=tmp_path,
+        task_generation_model="planner-model",
+    )
+    planner = AgentPlanner(agent, config=config, functions_registry=functions_registry)
+
+    async def fake_llm_chat(*, llm_model, messages, api_base=None, api_key=None, response_format=None):
+        assert llm_model == "planner-model"
+        return (
+            '{"actions":[{"description":"Inspect request context","depends_on":[]},'
+            '{"description":"Draft final response","depends_on":[0]}],'
+            '"completion_criteria":["User gets complete answer"]}'
+        )
+
+    monkeypatch.setattr("agentkit.planning.planner.llm_chat", fake_llm_chat)
+
+    message = Message(
+        source="human",
+        to="agent",
+        content="Please summarize latest logs.",
+        message_type=MessageType.CHAT,
+    )
+    action = await planner.plan_for_message(message, conversation_id="conv-plan")
+    assert action["action_type"] == "use_brain"
+
+    task_state = next(iter(planner.tasks.values()))
+    assert [a.description for a in task_state.actions] == [
+        "Inspect request context",
+        "Draft final response",
+    ]
+    assert task_state.metadata["completion_criteria"] == ["User gets complete answer"]
+    assert task_state.metadata["action_dependencies"] == [[], [0]]
+    assert task_state.metadata["planning_model"] == "planner-model"
+
+
+@pytest.mark.asyncio
+async def test_plan_uses_fallback_action_without_planner_model(planner):
+    message = Message(
+        source="human",
+        to="agent",
+        content="Any update?",
+        message_type=MessageType.CHAT,
+    )
+    await planner.plan_for_message(message, conversation_id="conv-fallback")
+    task_state = next(iter(planner.tasks.values()))
+    assert len(task_state.actions) == 1
+    assert task_state.actions[0].description == "Respond to the requester with a complete answer."

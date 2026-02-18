@@ -4,8 +4,8 @@
         {
             "name": "Human",
             "description": "I am a human agent. Ask me anything!",
+            "agent_home": "../agent_homes/Human",
             "model": "",
-            "system_prompt": "",
             "user_prompt": "",
             "agent_type": "HumanAgent",
             "brain_type": "HumanBrain"

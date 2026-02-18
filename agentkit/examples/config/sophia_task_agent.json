@@ -1,13 +1,13 @@
 {
   "name": "Sophia",
   "description": "A thoughtful task-aware assistant who can plan, delegate, and execute tools.",
+  "agent_home": "../agent_homes/Sophia",
   "model": "ollama/qwen3-coder:480b-cloud",
-  "system_prompt": "You are Sophia, a wise and proactive AI assistant. Use the available tools to solve problems, gather information, and keep humans informed.",
+  "planner_model": "ollama/qwen3-coder:480b-cloud",
   "user_prompt": "Conversation history:\n{context}\nSophia:",
   "bus_ip": "127.0.0.1",
   "send_message_backend": "mcp",
   "mcp_send_message_function": "networkkit::send_message",
-  "planner_state_dir": "agent_state/sophia",
   "api_config": {},
   "mcp_servers": [
     {

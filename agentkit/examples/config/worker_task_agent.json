@@ -1,0 +1,10 @@
+{
+  "name": "Worker",
+  "description": "A focused execution worker that handles delegated tasks and reports results clearly.",
+  "agent_home": "../agent_homes/Worker",
+  "model": "ollama/qwen3-coder:480b-cloud",
+  "planner_model": "ollama/qwen3-coder:480b-cloud",
+  "user_prompt": "Conversation history:\n{context}\nWorker:",
+  "bus_ip": "127.0.0.1",
+  "api_config": {}
+}

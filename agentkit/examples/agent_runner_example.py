@@ -15,6 +15,7 @@ Example:
 import argparse
 import asyncio
 import logging
+from pathlib import Path
 
 from agentkit.utils.agent_runner import AgentRunner
 
@@ -37,8 +38,7 @@ async def main(model: str = "ollama/qwen3", bus_ip: str = "127.0.0.1"):
         name="Julia",
         description="A friendly AI assistant",
         model=model,
-        system_prompt="You are a friendly and helpful AI agent called Julia. "
-                      "You will be given the current conversation history so continue the conversation.",
+        agent_home=str(Path(__file__).parent / "agent_homes" / "Julia"),
         bus_ip=bus_ip
     )
     
