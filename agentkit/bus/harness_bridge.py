@@ -107,13 +107,15 @@ class BaseHarness:
         return r.stdout
 
     def _send_keys(self, text: str):
+        # Use tmux buffers to avoid blocking on pty input
+        # Load text into a tmux buffer, then paste it
         subprocess.run(
-            ["tmux", "send-keys", "-t", self.session, "-l", text],
-            capture_output=True,
+            ["tmux", "set-buffer", "-t", self.session, text + "\n"],
+            capture_output=True, timeout=5,
         )
         subprocess.run(
-            ["tmux", "send-keys", "-t", self.session, "Enter"],
-            capture_output=True,
+            ["tmux", "paste-buffer", "-t", self.session, "-d"],
+            capture_output=True, timeout=5,
         )
 
     def is_idle(self) -> bool:
@@ -127,45 +129,32 @@ class BaseHarness:
 
 
 class CCHarness(BaseHarness):
-    """Claude Code harness — idle via ❯ prompt, busy via 'esc to interrupt'."""
+    """Claude Code harness — idle via ❯ prompt on its own line."""
 
     IDLE_MARKER = "❯"
-    BUSY_INDICATOR = "esc to interrupt"
 
     def is_idle(self) -> bool:
         pane = self._capture_pane()
-        return self.IDLE_MARKER in pane and self.BUSY_INDICATOR not in pane
+        # CC is idle when ❯ appears on one of the LAST few lines (actual input prompt)
+        # Not just anywhere in scrollback
+        lines = [l.strip() for l in pane.rstrip().split("\n") if l.strip()]
+        # Check last 5 non-empty lines for the idle marker
+        tail = lines[-5:] if len(lines) >= 5 else lines
+        for line in tail:
+            if line == self.IDLE_MARKER or line == self.IDLE_MARKER + " ":
+                return True
+        return False
+
+    def is_busy(self) -> bool:
+        """CC is actively generating (pane changing, no idle prompt)."""
+        return not self.is_idle()
 
     def send(self, message: str, timeout: int = 120) -> str | None:
-        if not self._wait_for_stable_idle(timeout=60):
-            return None
-
-        before = self._capture_pane()
-
+        # Fire-and-forget: inject into CC's input stream.
+        # CC queues input and processes it after current work completes.
         self._send_keys(message)
-
-        time.sleep(3)
-        post_send = self._capture_pane()
-        if post_send == before and self.is_idle():
-            self._stale_count += 1
-            return None
-
-        if not self._wait_for_done(timeout=timeout):
-            return None
-
-        after = self._capture_pane()
-
-        if after == before:
-            self._stale_count += 1
-            return None
-
-        if self._last_response and after == self._last_response:
-            self._stale_count += 1
-            return None
-
-        self._last_response = after
         self._stale_count = 0
-        return after
+        return "__DELIVERED__"
 
     def restart_session(self) -> bool:
         subprocess.run(["tmux", "send-keys", "-t", self.session, "C-c"], capture_output=True)
@@ -189,41 +178,32 @@ class CCHarness(BaseHarness):
 
     def _wait_for_stable_idle(self, timeout: int = 60, stable_seconds: float = 3.0) -> bool:
         deadline = time.time() + timeout
-        last_pane = ""
         stable_since = 0.0
+        was_idle = False
 
         while time.time() < deadline:
-            pane = self._capture_pane()
             if not self.is_idle():
-                last_pane = ""
                 stable_since = 0.0
+                was_idle = False
                 time.sleep(1)
                 continue
 
-            if pane == last_pane:
-                if time.time() - stable_since >= stable_seconds:
-                    return True
-            else:
-                last_pane = pane
+            if not was_idle:
+                was_idle = True
                 stable_since = time.time()
+
+            if time.time() - stable_since >= stable_seconds:
+                return True
 
             time.sleep(0.5)
         return False
 
     def _wait_for_done(self, timeout: int = 300) -> bool:
+        """Wait for CC to finish processing and return to idle."""
         deadline = time.time() + timeout
-        busy_seen = False
-        while time.time() < deadline:
-            pane = self._capture_pane()
-            if self.BUSY_INDICATOR in pane:
-                busy_seen = True
-                break
-            if busy_seen:
-                break
-            time.sleep(0.5)
-            if self.is_idle():
-                return True
-
+        # First wait for CC to become non-idle (it's processing)
+        time.sleep(2)
+        # Then wait for it to come back to idle
         while time.time() < deadline:
             if self.is_idle():
                 time.sleep(1)
@@ -477,6 +457,17 @@ class HarnessBridge(BusParticipant):
                 None, self._harness.send, prefixed, self.hc.send_timeout
             )
             self._processing.clear()
+
+            if response == "__BUSY__":
+                log.info("CC busy — re-queuing message from %s (will retry when idle)", clean_source)
+                await self._queue.put((priority, ts, msg))
+                await asyncio.sleep(10)
+                continue
+
+            if response == "__DELIVERED__":
+                self._consecutive_failures = 0
+                log.info("Delivered to CC (agent replies directly)")
+                continue
 
             if response:
                 self._consecutive_failures = 0

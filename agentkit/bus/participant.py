@@ -34,6 +34,8 @@ class BusParticipant(ABC):
 
     name: str = "unnamed"
 
+    SILENT_DEATH_TIMEOUT = 90  # seconds without any ZMQ message triggers reconnect
+
     def __init__(self, config: BusConfig):
         self.config = config
         if not self.name or self.name == "unnamed":
@@ -42,6 +44,7 @@ class BusParticipant(ABC):
         self._http_session = None
         self._zmq_ctx: zmq.asyncio.Context | None = None
         self._zmq_sub: zmq.asyncio.Socket | None = None
+        self._last_recv_time: float = 0.0
         self._setup_logging()
 
     def _setup_logging(self):
@@ -173,6 +176,7 @@ class BusParticipant(ABC):
         self._zmq_sub.setsockopt_string(zmq.SUBSCRIBE, "")
         self._zmq_sub.setsockopt(zmq.RCVTIMEO, 5000)
         self._zmq_sub.connect(self.config.bus_zmq_address)
+        self._last_recv_time = time.time()
 
     async def _message_loop(self) -> None:
         reconnect_delay = 1
@@ -181,6 +185,7 @@ class BusParticipant(ABC):
         while self._running:
             try:
                 raw = await self._zmq_sub.recv_json(flags=zmq.NOBLOCK)
+                self._last_recv_time = time.time()
                 message = Message.model_validate(raw)
 
                 # Handle HELO/ACK at base level
@@ -197,7 +202,18 @@ class BusParticipant(ABC):
                 reconnect_delay = 1  # reset on success
 
             except zmq.Again:
-                await asyncio.sleep(0.1)
+                # Check for silent death: no messages received for too long
+                silence = time.time() - self._last_recv_time
+                if silence > self.SILENT_DEATH_TIMEOUT:
+                    log.warning(
+                        "ZMQ silent death detected (no messages for %.0fs) — reconnecting",
+                        silence,
+                    )
+                    await self._reconnect_zmq()
+                    self._last_recv_time = time.time()
+                    await self.send_helo()
+                else:
+                    await asyncio.sleep(0.1)
             except zmq.ZMQError as e:
                 if e.errno == zmq.ETERM:
                     break
