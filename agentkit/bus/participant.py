@@ -84,7 +84,7 @@ class BusParticipant(ABC):
         except KeyboardInterrupt:
             pass
 
-    async def send(self, to: str, content: str | dict, message_type: MessageType = MessageType.CHAT) -> None:
+    async def send(self, to: str, content: str | dict, message_type: MessageType = MessageType.CHAT, in_reply_to: str = None, id: str = None) -> None:
         """Send a message to the bus."""
         if isinstance(content, dict):
             content = json.dumps(content, ensure_ascii=False)
@@ -94,6 +94,8 @@ class BusParticipant(ABC):
             to=to,
             content=content,
             message_type=message_type,
+            in_reply_to=in_reply_to,
+            id=id,
         )
         await self._http_send(msg)
 
