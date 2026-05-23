@@ -37,6 +37,71 @@ PRIORITY_USER = 1
 PRIORITY_HEARTBEAT = 2
 
 
+# ── Enforcement Layer ──────────────────────────────────────────────────────
+
+
+class EnforcementLayer:
+    """Post-response inspection: checks if agent updated state files after task-relevant interactions."""
+
+    def __init__(self, workdir: str, tracked_files: list[str] | None = None):
+        self._workdir = Path(workdir).expanduser()
+        self._tracked = tracked_files or ["TASKS.md", "WORKING.md", "MEMORY.md"]
+        self._nudge_count = 0
+        self._interaction_count = 0
+        self._update_count = 0
+        self._log_path = self._workdir / ".bridge-enforcement.jsonl"
+
+    def snapshot_mtimes(self) -> dict[str, float]:
+        result = {}
+        for f in self._tracked:
+            p = self._workdir / f
+            try:
+                result[f] = p.stat().st_mtime
+            except FileNotFoundError:
+                result[f] = 0.0
+        return result
+
+    def check_state_update(self, before: dict[str, float], after: dict[str, float]) -> bool:
+        return any(after.get(f, 0) > before.get(f, 0) for f in self._tracked)
+
+    def is_task_relevant(self, source: str) -> bool:
+        return source.startswith("telegram:") or source.startswith("scheduler:")
+
+    def should_nudge(self, source: str, state_updated: bool) -> bool:
+        if not self.is_task_relevant(source):
+            return False
+        self._interaction_count += 1
+        if state_updated:
+            self._update_count += 1
+            return False
+        return True
+
+    def record(self, source: str, state_updated: bool, nudged: bool):
+        import json as _json
+        entry = {
+            "ts": time.time(),
+            "source": source,
+            "state_updated": state_updated,
+            "nudged": nudged,
+            "total": self._interaction_count,
+            "updates": self._update_count,
+            "nudges": self._nudge_count,
+        }
+        try:
+            with open(self._log_path, "a") as f:
+                f.write(_json.dumps(entry) + "\n")
+        except Exception:
+            pass
+
+    @property
+    def compliance_rate(self) -> float:
+        if self._interaction_count == 0:
+            return 1.0
+        return self._update_count / self._interaction_count
+
+    NUDGE_MESSAGE = "📋 Task checkpoint — did this advance a task? Update TASKS.md or WORKING.md if so."
+
+
 class HarnessConfig(BusConfig):
     """Config for the harness bridge."""
 
@@ -49,6 +114,8 @@ class HarnessConfig(BusConfig):
         self.peer_dir: str = kwargs.pop("peer_dir", "")
         self.auto_restart: bool = kwargs.pop("auto_restart", True)
         self.alert_destination: str = kwargs.pop("alert_destination", "")
+        self.enforce: bool = kwargs.pop("enforce", False)
+        self.enforce_nudge: bool = kwargs.pop("enforce_nudge", False)
         super().__init__(**kwargs)
 
     @classmethod
@@ -74,6 +141,8 @@ class HarnessConfig(BusConfig):
             peer_dir=os.environ.get("PEER_DIR", ""),
             auto_restart="1" in os.environ.get("AUTO_RESTART", "1"),
             alert_destination=os.environ.get("ALERT_DESTINATION", ""),
+            enforce="1" in os.environ.get("BRIDGE_ENFORCE", "0"),
+            enforce_nudge="1" in os.environ.get("BRIDGE_ENFORCE_NUDGE", "0"),
         )
 
 
@@ -288,8 +357,9 @@ class KiroCliHarness(BaseHarness):
 
     def _extract_response(self) -> str:
         pane = self._capture_pane_long()
-        lines = [l for l in pane.split("\n") if l.strip()]
+        lines = pane.split("\n")
 
+        # Find last Credits line
         credits_idx = None
         for i in range(len(lines) - 1, -1, -1):
             if self.DONE_MARKER.search(lines[i]):
@@ -298,18 +368,35 @@ class KiroCliHarness(BaseHarness):
         if credits_idx is None:
             return ""
 
-        response_lines = []
+        # Find separator before this response
+        sep_idx = None
         for i in range(credits_idx - 1, -1, -1):
-            line = lines[i].strip()
-            if "────" in line:
+            if "────" in lines[i]:
+                sep_idx = i
                 break
-            response_lines.append(line)
+        if sep_idx is None:
+            return ""
 
-        response_lines.reverse()
-        if response_lines:
-            response_lines = response_lines[1:]
+        # Between separator and Credits: input echo block, empty line, response block, empty line
+        block = lines[sep_idx + 1:credits_idx]
 
-        return "\n".join(response_lines).strip()
+        # Split into segments by empty lines
+        segments = []
+        current = []
+        for line in block:
+            if line.strip() == "":
+                if current:
+                    segments.append(current)
+                    current = []
+            else:
+                current.append(line.strip())
+        if current:
+            segments.append(current)
+
+        # Last non-empty segment is the response
+        if segments:
+            return "\n".join(segments[-1])
+        return ""
 
 
 # ── Bridge BusParticipant ──────────────────────────────────────────────────
@@ -341,7 +428,14 @@ class HarnessBridge(BusParticipant):
         self._consecutive_failures = 0
         self._seen_hashes: set[str] = set()
         self._seen_max = 100
+        self._known_agents: set[str] = {"sophia", "kiro", "megu", "rin"}
         self._peer_dir = Path(config.peer_dir or config.workdir).expanduser() / "peers"
+
+        # Enforcement layer (opt-in via BRIDGE_ENFORCE=1)
+        self._enforce: EnforcementLayer | None = None
+        if config.enforce:
+            self._enforce = EnforcementLayer(config.workdir)
+            log.info("Enforcement layer enabled (workdir=%s, nudge=%s)", config.workdir, config.enforce_nudge)
 
     def is_intended_for_me(self, message: Message) -> bool:
         to = message.to.lower()
@@ -363,13 +457,19 @@ class HarnessBridge(BusParticipant):
         if message.message_type not in (MessageType.CHAT.value, "CHAT"):
             return
 
-        # Dedup
-        msg_hash = hashlib.md5(f"{source}:{content}".encode()).hexdigest()
+        # Dedup — use message id if available, else source+content hash (no timestamp)
+        msg_id = getattr(message, 'id', None)
+        if msg_id:
+            msg_hash = f"id:{msg_id}"
+        else:
+            msg_hash = hashlib.md5(f"{source}:{content}".encode()).hexdigest()
         if msg_hash in self._seen_hashes:
             return
         self._seen_hashes.add(msg_hash)
         if len(self._seen_hashes) > self._seen_max:
-            self._seen_hashes.clear()
+            to_remove = list(self._seen_hashes)[:self._seen_max // 2]
+            for h in to_remove:
+                self._seen_hashes.discard(h)
 
         # Extract text from JSON content
         if content.strip().startswith("{"):
@@ -396,16 +496,18 @@ class HarnessBridge(BusParticipant):
             "source": source,
             "clean_source": clean_source,
             "content": content,
+            "in_reply_to": getattr(message, 'in_reply_to', None),
+            "message_id": getattr(message, 'id', None),
         }))
 
         label = ["AGENT", "USER", "HB"][priority]
         log.info("Queued [%s] from %s: %s", label, clean_source, content[:60])
 
         # Busy ACK for telegram
-        if clean_source.startswith("telegram:") and self._processing.is_set():
+        if clean_source.startswith("telegram:") and (self._processing.is_set() or not self._harness.is_idle()):
             await self.send(
                 clean_source,
-                json.dumps({"text": "📨 受け取ったよ！今別のメッセージ処理中。少し待ってね。"}, ensure_ascii=False),
+                json.dumps({"text": "📨 受け取ったよ！今別の作業中。少し待ってね。"}, ensure_ascii=False),
             )
 
     async def on_start(self) -> None:
@@ -449,6 +551,9 @@ class HarnessBridge(BusParticipant):
             label = ["AGENT", "USER", "HB"][priority]
             log.info("Processing [%s] from %s: %s", label, clean_source, content[:60])
 
+            # Snapshot file mtimes before interaction (for enforcement)
+            mtimes_before = self._enforce.snapshot_mtimes() if self._enforce else None
+
             self._processing.set()
             prefixed = f"[from: {clean_source}]\n{content}"
 
@@ -457,6 +562,25 @@ class HarnessBridge(BusParticipant):
                 None, self._harness.send, prefixed, self.hc.send_timeout
             )
             self._processing.clear()
+
+            # Post-response enforcement check
+            if self._enforce and mtimes_before and response and response not in ("__BUSY__", "__DELIVERED__"):
+                mtimes_after = self._enforce.snapshot_mtimes()
+                state_updated = self._enforce.check_state_update(mtimes_before, mtimes_after)
+                should_nudge = self._enforce.should_nudge(clean_source, state_updated)
+                nudged = False
+
+                if should_nudge and self.hc.enforce_nudge:
+                    self._enforce._nudge_count += 1
+                    nudged = True
+                    log.info("Enforcement: nudging (no state update after task-relevant interaction)")
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, self._harness.send, self._enforce.NUDGE_MESSAGE, 60
+                    )
+                elif should_nudge:
+                    log.info("Enforcement: would nudge (logging only, BRIDGE_ENFORCE_NUDGE=0)")
+
+                self._enforce.record(clean_source, state_updated, nudged)
 
             if response == "__BUSY__":
                 log.info("CC busy — re-queuing message from %s (will retry when idle)", clean_source)
@@ -474,7 +598,11 @@ class HarnessBridge(BusParticipant):
                 log.info("Response (%d chars): %s", len(response), response[:80])
 
                 if clean_source.startswith("telegram:"):
-                    log.info("Telegram source — skipping auto-forward (agent replies directly)")
+                    log.info("Telegram source — agent replies via netkit send")
+                elif clean_source in self._known_agents:
+                    log.info("Agent source (%s) — agent replies via netkit send", clean_source)
+                elif msg.get("in_reply_to"):
+                    log.info("Response (in_reply_to=%s) — skipping auto-forward", msg["in_reply_to"])
                 elif priority != PRIORITY_HEARTBEAT:
                     await self.send(clean_source, response)
                     log.info("Published reply to %s (%d chars)", clean_source, len(response))
