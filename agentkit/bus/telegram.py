@@ -159,9 +159,12 @@ class TelegramAdapter(BusParticipant):
         bot = self._app.bot
 
         if file_path and Path(file_path).is_file():
+            doc_caption = caption or text or None
+            if doc_caption and len(doc_caption) > 1024:
+                doc_caption = doc_caption[:1024]
             with open(file_path, "rb") as f:
-                await bot.send_document(chat_id=chat_id, document=f, caption=caption)
-            log.info("Outbound file chat_id=%s path=%s", chat_id, file_path)
+                await bot.send_document(chat_id=chat_id, document=f, caption=doc_caption)
+            log.info("Outbound file chat_id=%s path=%s caption=%s", chat_id, file_path, bool(doc_caption))
         elif text:
             for i in range(0, len(text), 4096):
                 await bot.send_message(chat_id=chat_id, text=text[i:i + 4096])
