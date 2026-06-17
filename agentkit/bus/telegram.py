@@ -88,13 +88,17 @@ class TelegramAdapter(BusParticipant):
     def is_intended_for_me(self, message: Message) -> bool:
         # Match if addressed directly to us (e.g. to="telegram-megu")
         if message.to == self.name:
+            log.debug("ACCEPT (direct name match): source=%s to=%s", message.source, message.to)
             return True
         # Match if from our agent and addressed to a telegram chat
         src = message.source.lower().removeprefix("router:")
         agent = self.tc.agent_name.lower()
         if not (src == agent or src == f"harness:{agent}" or src.startswith(f"{agent}:")):
             return False
-        return self._chat_id_from_to(message.to) is not None
+        has_chat = self._chat_id_from_to(message.to) is not None
+        if has_chat:
+            log.info("ACCEPT outbound: source=%s to=%s (agent=%s)", message.source, message.to, agent)
+        return has_chat
 
     async def handle_message(self, message: Message) -> None:
         """Outbound: agent response → Telegram."""

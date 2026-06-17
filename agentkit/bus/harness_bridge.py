@@ -179,11 +179,16 @@ class BaseHarness:
         # Use tmux buffers to avoid blocking on pty input
         # Load text into a tmux buffer, then paste it
         subprocess.run(
-            ["tmux", "set-buffer", "-t", self.session, text + "\n"],
+            ["tmux", "set-buffer", "-t", self.session, text],
             capture_output=True, timeout=5,
         )
         subprocess.run(
             ["tmux", "paste-buffer", "-t", self.session, "-d"],
+            capture_output=True, timeout=5,
+        )
+        # Send Enter keystroke to submit (paste-buffer \n doesn't trigger submit in TUIs)
+        subprocess.run(
+            ["tmux", "send-keys", "-t", self.session, "Enter"],
             capture_output=True, timeout=5,
         )
 
@@ -219,8 +224,9 @@ class CCHarness(BaseHarness):
         return not self.is_idle()
 
     def send(self, message: str, timeout: int = 120) -> str | None:
-        # Fire-and-forget: inject into CC's input stream.
-        # CC queues input and processes it after current work completes.
+        # Wait for CC to be idle (prompt empty) before injecting
+        if not self._wait_for_stable_idle(timeout=60, stable_seconds=2.0):
+            return None
         self._send_keys(message)
         self._stale_count = 0
         return "__DELIVERED__"
@@ -301,7 +307,7 @@ class KiroCliHarness(BaseHarness):
 
         subprocess.run(["tmux", "send-keys", "-t", self.session, "-X", "cancel"], capture_output=True)
         time.sleep(0.1)
-        subprocess.run(["tmux", "send-keys", "-t", self.session, message, "Enter"], check=True)
+        self._send_keys(message)
 
         deadline_accept = time.time() + 15
         while time.time() < deadline_accept:
@@ -555,7 +561,16 @@ class HarnessBridge(BusParticipant):
             mtimes_before = self._enforce.snapshot_mtimes() if self._enforce else None
 
             self._processing.set()
-            prefixed = f"[from: {clean_source}]\n{content}"
+            # Replace newlines with spaces to prevent paste-buffer splitting
+            # into multiple CC inputs (each \n acts as Enter in terminal)
+            clean_content = content.replace("\n", " ")
+            prefixed = f"[from: {clean_source}] {clean_content}"
+
+            # Long messages crash kiro-cli TUI — write to file and send path instead
+            if len(prefixed) > 800:
+                msg_file = Path(self.hc.workdir).expanduser() / ".bridge-incoming.md"
+                msg_file.write_text(prefixed, encoding="utf-8")
+                prefixed = f"[from: {clean_source}]\n(Long message saved to {msg_file} — read it with your file tools)"
 
             # Run harness.send in a thread (it's blocking)
             response = await asyncio.get_running_loop().run_in_executor(

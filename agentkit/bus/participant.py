@@ -195,7 +195,10 @@ class BusParticipant(ABC):
                     self._handle_system(message)
                     continue
 
-                if self.is_intended_for_me(message):
+                intended = self.is_intended_for_me(message)
+                if not intended and "kiro-hb" in message.source:
+                    log.warning("REJECTED kiro-hb: to=%r, name=%r", message.to, getattr(self, 'name', '?'))
+                if intended:
                     try:
                         await self.handle_message(message)
                     except Exception:
