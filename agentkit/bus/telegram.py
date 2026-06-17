@@ -123,10 +123,21 @@ class TelegramAdapter(BusParticipant):
         try:
             content = json.loads(message.content)
         except (json.JSONDecodeError, TypeError):
+            log.warning("Outbound content not JSON-parseable: %r", message.content[:200])
             content = {"text": str(message.content)}
+
+        # Double-stringified check: if content is still a string after first parse, try again
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                content = {"text": content}
 
         text = str(content.get("text", "")).strip()
         file_path = str(content.get("file_path", "")).strip()
+        if file_path:
+            from pathlib import Path as _P
+            log.info("Outbound file_path=%s exists=%s", file_path, _P(file_path).is_file())
         caption = str(content.get("caption", "")).strip() or None
 
         # Handle reactions
